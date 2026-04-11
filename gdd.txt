@@ -1,0 +1,82 @@
+mini-GDD: Concurso VibeJam 26
+Título (provisional): Infinity Vibe Slug
+
+Género: Run’n’Gun en scroll automático
+Objetivo: Aguantar oleadas infinitas de enemigos haciendo puntos eliminándolos
+
+Consideraciones importantes: Es un rip-off del Metal Slug de NeoGeo, es importante que se sienta igual (fluido y satisfactorio) y/o parezca igual (estética pixel). La única diferencia es que es un modo survival.
+
+
+ELEMENTOS:
+
+
+Cámara: Como es un auto-scroll, el juego está en perspectiva 2D. El suelo, al no ser un plataformas, no cobra mucha altura y el fondo puede ser un mero jpg cíclico. El jugador parte del extremo izquierdo y, si no hace nada, avanza automáticamente. Los enemigos spawnean del extremo derecho.
+
+
+Jugador: (muere de un toque)
+	Mecánicas:
+		Disparo: dispara con una pistola con una cadencia fija pero es semi-automática, es decir, tiene que machacar el botón de disparo para disparar rápido pero no puede disparar por encima de esa cadencia aunque machaque más rápido. Por ejemplo: si la cadencia es de 2 disparos por segundo no puedes hacer 3 si metes 3 inputs en ese segundo. En el original, si el jugador colisiona con un enemigo y efectúa un disparo no se dispara el arma, si no que el sprite realiza un ataque cuerpo a cuerpo (ahorrando una bala si el jugador llevaba armas con munición finita).
+
+		Salto y movimiento: la regla suele ser de una altura de salto 3 veces la altura del sprite. En cuanto al movimiento, puede ser “tricky” porque te mueves de izquierda a derecha en un mundo que se mueve hacia ti, porque es scroll automático. El sprite nunca rota, siempre mira hacia la derecha.
+
+		Granada: empiezas teniendo 10, normalmente. Se lanza en parábola y hace daño AoE, más daño que un impacto de bala (se verá más adelante).
+
+		Agacharse (opcional): en el original te podías agachar para esquivar algunas balas. Aquí ya se verá por como encaje con todo el tema del scroll automático. También servía para hacer disparos hacia abajo en medio de un salto.
+
+Enemigos:
+	Consideraciones: En Metal Slug (y aquí), los enemigos no colisionan entre ellos, se aglomeran y se atraviesan, al igual que sus balas. Y a la hora de hacer alguna acción (saltar, disparar, etc) siempre hay un retardo breve, una suerte de animación previa antes de realizarlo (por ejemplo, sacaban la pistola y apuntaban antes de disparar). Incluso en el original, el movimiento era pausado, no avanzaban derecho hacia el jugador, reaccionaban a ti con una breve animación de sorpresa, iban hacia atrás, etc,etc.
+	3 tipos:
+		1º (soldado raso): mueren de un toque, disparan de vez en cuando y si colisionan con el jugador, tras un breve retardo, hacen un ataque cuerpo a cuerpo que mata al jugador si no se aparta (el margen es muy estrecho, pero no es como las colisiones clásicas de “tocar y morir”). Pueden saltar a plataformas. Son el 85-90% de los enemigos.
+
+		2º (soldado con escudo): son iguales al primero excepto en que son inmunes a balas (a menos que saltaras por encima de ellos y disparases hacia abajo), no son inmunes a explosiones y ataques cuerpo a cuerpo. No saltan a plataformas. Disparan menos que los primeros. Servían para proteger a otros enemigos y que se acumulasen, lo cual era muy satisfactorio cuando los eliminabas y segabas a todos los que estuvieran detrás (que como digo serían los normales). También hacen ataque cuerpo a cuerpo en la colisión. Son más lentos que los primeros y dan el doble de puntos.
+
+		3º (tanqueta): De tamaño grande, pero lo suficiente como para ser saltado por el jugador. Matan en colisión instantánea. Son más lentos que los anteriores. Disparan una bola que rueda por el suelo (en el original se “desparramaba” del cañón y de ahí rodaba). Aguantan varios toques, digamos 10-12, pero 3-4 explosiones. Menos frecuentes que los anteriores, pero dan 5 veces más puntos.
+
+	Notas: las balas enemigas parpadean en dos colores y son algo más lentas que las del jugador. Digamos que los puntos base son X (para el 1º tipo), 2X (para el 2º) y 5X (para el 3º).
+
+Power-ups (armas) y drops
+
+	Consideraciones: los enemigos dropean armas que alteran el ataque del jugador. Tienen munición por lo cual se agotan y el jugador vuelve a la pistola. Si se coge un arma nueva teniendo otra, se pierde la que tenías por la nueva. Si coges la misma, se suma la munición base a la munición que ya tienes. Esto es un factor estratégico por si el jugador considera evitar un arma nueva.
+
+	Machinegun: Es la hermana mayora de la pistola. Dispara balas a una cadencia elevada y permite mantener pulsado el botón de disparo para hacerlo automático. Tiene 200 balas de base.
+
+	Escopeta: Hace daño en un cono algo corto por delante del jugador. Atraviesa todo, incluido el escudo. Tiene una cadencia algo más lenta que la de la pistola, no automática. Tiene 50 balas de base. Puede cargarse una tanqueta en 5-6 disparos.
+
+	Rocket Launcher: Dispara cohetes que explotan y hacen daño AoE. La velocidad de vuelo del cohete es diferente a la de la bala. Mismo poder destructivo que la escopeta pero más alcance. Hace el mismo daño que la granada. Tiene 20 balas de base.
+
+	Reposiciones de granadas: Se dropean también packs de granadas para reponer las del jugador. 5-10 por pack. El jugador puede llevar 30 granadas máximo.
+
+Drop rates: Esto es lo complicado y creo que la IA es la que debería llevar la batuta en los cálculos matemáticos (amo q lo q diga vaya a misa) porque yo entiendo algo de probabilística pero no sé cómo aplicarlo directamente. Pero puedo ordenar los factores que se tienen que tener en cuenta para ello. 
+		1º Probabilidad base: La machinegun es la más “debil”, es una extensión de la pistola, si tiene 200 balas puede llevarse a 200 enemigos; si sumamos los fallos del jugador y las tanquetas que requieren más de una bala, debería dropearse una machinegun cada 150 enemigos aproximadamente para que el jugador no “gane” ni “pierda” balas. Economía es la palabra. Esto es un 0.667% de probabilidad de drop por cada baja (1/150). Lo mismo aplica a la escopeta y al rocket launcher. Puede ser que o bien haya varios drops seguidos o no haya ninguno en mucho tiempo. Y de ahí lo siguiente.
+		2º “Pity System”: Un clásico. Se aplica en el Hearthstone para asegurar una legendaria cada X sobres. Aquí igual, si no ha habido un drop de algún arma en X bajas (300 para la machinegun, 150 para escopeta o 100 para rocket launcher, por ejemplo) se garantiza un drop. Aún no sé si hacer un Pity System duro (aplicándose directamente) o dinámico (modificando la probabilidad, es decir, aumentándola exponencialmente en vez de dar el drop directamente).
+		3º Modificadores dinámicos: Modifica la probabilidad base según factores situacionales como la densidad de enemigos en pantalla, la velocidad del juego, la presión de los enemigos sobre el jugador (lo cerca que alcancen al jugador) o el peso probabilístico de cada arma sobre el total probabilístico (el machinegun la que más o el rocket launcher -la más poderosa- la que menos).
+	
+	Nota:  el sistema debe permitir el dropeo más o menos frecuente sin ser generoso, y ayudar cuando se deba pero castigar al que desperdicie.
+
+Obstáculos:
+
+Se deberían spawnear plataformas y obstáculos para hacerlo más vertical y ayudar al jugador a poner tierra de por medio. No muchos porque esto no es un plataformas, no muy frecuente para que el jugador no toque tierra nunca. Una sería una plataforma de no mucha longitud que el jugador sea capaz de saltar y, a veces, no siempre, y a continuación, haya otra más alta y que solo se pueda alcanzar desde la anterior. Si este es el caso, siempre habrá otra de altitud inferior a continuación para que los soldados rasos también puedan subir. Otro obstáculo sería una rampa doble con “descansillo” en lo alto en ambos lados, cubriendo a los enemigos, esto forma cuellos de botella para el jugador, que se le acumulen los enemigos, incluso el contrario: que la rampa baje y luego suba.
+
+Escalado:
+
+Como es un juego infinito, debe haber un escalado que aumente la dificultad hasta que el jugador inevitablemente pierda. No sé cómo implementar esto pero entiendo que los factores son más enemigos, mayor calidad de enemigos (más tanquetas) y mayor velocidad. En cuanto al primero, el más importante, sería un escalado exponencial e infinito (el jugador DEBE perder), empezando por spawns muy lentos. En cuanto al segundo, habría que establecer unas probabilidades base para cada tipo de enemigo: 90% para el raso, 9% para el escudo y 1% para la tanqueta, por ejemplo y estas probabilidades van deslizándose paulatinamente con el tiempo hasta un cap; por ejemplo, 10% para la tanqueta, 20% para el escudo y 70% para el raso. Y en cuanto a la velocidad, no es una característica de estos juegos pero, al ser esto lo que es, debería aumentarse muy lentamente hasta un cap que no sature pero se note.
+
+Fin del juego: como se ha dicho el jugador muere de un toque, es injusto si es difícil de primeras y potencia el pique si el jugador logra aguantar un tiempo determinado. La pantalla de “game over” debería mostrar la puntuación y las opciones de reintentar, salir o registrar la puntuación (ver más adelante). El high-score del jugador debería guardarse en un algún lugar del main menu para que el jugador sepa su puntuación a superar.
+
+Miscelánea (modo 2 jugadores): 
+
+Es factible (weno ni puta idea yo de como se programa esto) introducir un modo 2 jugadores. Ambos se atraviesan entre sí y entre sus balas. No haría falta retocar el escalado porque por cantidad de enemigos al final acabarían abrumados. Si bien sí que habría que mirar los drop rates de armas para 2. Se podría hacer incluso en local (2 jugadores 1 teclado). Si los controles para el jugador 1 son WASD para el movimiento, salto y crouch, Spacebar para disparo y E para granada para el jugador 2 sería teclas direccionales, 0 y . en el teclado numérico para lo mismo.
+
+Miscelánea 2 (leaderboard):
+
+Es factible (weno ni puta idea blabla) introducir que el jugador pueda registrar su puntuación en tablas de score, poniendo 3 letras como los arcades de toda la vida.
+
+Miscelánea 3 (logros?):
+
+Pues eso, aguantar X minutos, hacer X bajas con un arma, hacer X bajas seguidas con una granada, etc, etc,etc
+
+Música y efectos de sonido
+
+16bits puro directo a la nostalgia, rollete militar.
+
+Para los efectos de sonido me atengo al original los hay cuando: saltas, caminas, disparas, coges un arma, te disparan, el enemigo recibe un disparo, la tanqueta explota, una granada explota, el enemigo o tu morís.
