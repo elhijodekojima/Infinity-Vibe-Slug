@@ -15,6 +15,8 @@ export const COLORS = {
   ENEMY_TANK: 0x707068,
   BULLET_PLAYER: 0xffd86a,
   BULLET_ENEMY: 0xff6060,
+  GRENADE: 0x9ba634,
+  EXPLOSION: 0xffdd80,
   ACCENT: 0xffd86a,
   DANGER: 0xd04040,
 } as const;

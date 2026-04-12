@@ -1,15 +1,17 @@
 import { Mesh, PlaneGeometry, MeshBasicMaterial } from 'three';
 import { Input } from '../core/input';
 import { PLAYER, WORLD } from '../config/balance';
-import { COLORS } from '../config/colors';
+import { getPlayerTexture } from '../gfx/playerSprite';
 import type { AABB } from '../systems/collisions';
 
 /**
- * Placeholder player entity. A colored rectangle with horizontal move, jump
- * + gravity, and ground clamp. Exposes `x`, `y` (feet), `aabb`, and a
- * `muzzle` position for weapons to spawn bullets from.
+ * Player entity. Physics: horizontal move, jump with gravity, ground clamp.
+ * Visuals: a procedural pixel-art sprite (see gfx/playerSprite.ts) on a
+ * `PlaneGeometry` slightly larger than the collision box for a forgiving
+ * hitbox feel.
  *
- * The real pixel-art sprite + melee + crouch will be layered on top later.
+ * Exposes `x`, `y` (feet), `aabb`, and muzzle getters for weapons to spawn
+ * bullets/grenades from. Melee + crouch will be layered on top later.
  */
 export class Player {
   public readonly mesh: Mesh;
@@ -28,8 +30,16 @@ export class Player {
   };
 
   constructor() {
-    const geom = new PlaneGeometry(PLAYER.WIDTH, PLAYER.HEIGHT);
-    const mat = new MeshBasicMaterial({ color: COLORS.PLAYER_BODY });
+    // Sprite quad is larger than the collision box — the visual has ~3
+    // pixels of slack on every side so the hitbox feels generous.
+    const geom = new PlaneGeometry(PLAYER.SPRITE_W, PLAYER.SPRITE_H);
+    const mat = new MeshBasicMaterial({
+      map: getPlayerTexture(),
+      transparent: false,
+      // Alpha-test cuts out transparent pixels from the canvas texture
+      // without enabling full alpha blending — cleaner for pixel art.
+      alphaTest: 0.5,
+    });
     this.mesh = new Mesh(geom, mat);
     this.syncMesh();
   }
@@ -91,7 +101,9 @@ export class Player {
   }
 
   private syncMesh(): void {
-    // Mesh is centered on its geometry; offset so y is the feet position.
-    this.mesh.position.set(this._x, this._y + PLAYER.HEIGHT / 2, 0);
+    // The mesh is centered on its geometry; offset so y is the feet
+    // position. We use the SPRITE height here because the visual quad is
+    // larger than the collision box.
+    this.mesh.position.set(this._x, this._y + PLAYER.SPRITE_H / 2, 0);
   }
 }

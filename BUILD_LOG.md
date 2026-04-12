@@ -188,15 +188,152 @@
 #### ➡️ Siguiente paso
 
 - Validación visual por el usuario:
-  - [ ] Soldados raros rojos aparecen desde la derecha con ritmo creciente.
-  - [ ] Hesitan visiblemente (paradas breves).
-  - [ ] `Space` dispara balas amarillas a 320 u/s con cadencia 2/s (machacar no acelera).
-  - [ ] Balas matan soldados y suben score (+100).
-  - [ ] Player vs soldado → GAME OVER y highscore se guarda.
-  - [ ] Retry → todo se resetea limpio (pools, cooldowns, spawn timer).
-- Tras OK visual → siguiente hito candidato (elegir):
-  - (a) **Sprites procedurales pixel-art** — reemplazar los `MeshBasicMaterial` por texturas generadas en canvas offscreen (mantiene Zero-Loading). Mejor look inmediato.
-  - (b) **Enemigo escudo + tanqueta** con selección ponderada en `SpawnSystem` (matriz de probabilidades del GDD: 90/9/1 → 70/20/10 con el tiempo).
-  - (c) **Granadas + arma rocket** — lanzador parabólico con daño AoE (acerca el gameplay al Metal Slug real).
+  - [x] Soldados raros rojos aparecen desde la derecha con ritmo creciente.
+  - [x] Hesitan visiblemente (paradas breves).
+  - [x] `Space` dispara balas amarillas con cadencia 2/s.
+  - [x] Balas matan soldados y suben score.
+  - [x] Player vs soldado → GAME OVER y highscore se guarda.
+  - [x] Retry → todo se resetea limpio.
+- Siguiente elegido: **Sprite procedural pixel-art (Camino B) + granadas**.
+
+---
+
+### [2026-04-12] — Sprite procedural del player + granadas AoE
+
+**Estado general:** 🟢 verde
+**Bundle size actual:** pendiente (`vite build`)
+**Tiempo a primer paint:** sin cambios — sprite se genera a partir de arrays de strings en el primer frame de JS, cero descarga adicional
+**`tsc --noEmit`:** ✅ limpio
+
+#### ✅ Hecho
+
+**Infra: commit inicial + git identity**
+
+- Identidad local del repo configurada a `elhijodekojima <hatakelolo6@gmail.com>` vía `git config --local` (sin tocar el global `Rafael Gómez Rubio`).
+- `.gitignore` amplía para excluir `.claude/` (worktree accidental inofensivo).
+- Commit `d4ee74e` creado con todo el scaffolding + combate básico. **Push pendiente** porque Git Credential Manager en Windows tiene cacheado `RuFFuS4` y necesita PAT para `elhijodekojima`.
+- Config local adicional: `credential.username=elhijodekojima`, `credential.useHttpPath=true` como hint a GCM.
+
+**Sprite procedural del player (Camino B)**
+
+- **`src/gfx/pixelGen.ts`** (nuevo): helper `makePixelTexture(frames, palette)` que rasteriza arrays de strings de caracteres a un `CanvasTexture` con `NearestFilter`. Acepta rows de longitud variable (auto-pad con transparente) para permitir autoría cómoda. Reusable para cualquier sprite procedural futuro (enemigos, drops, UI).
+- **`src/gfx/playerSprite.ts`** (nuevo): paleta de 14 colores (olive cap, yellow accent, dark skin, beard, 3 tonos de verde militar, metal rifle, brown belt, boots) + frame idle de **20×32** píxeles. Soldado con gorra, barba, fusil pegado al costado. Lazy-build con cache — `getPlayerTexture()` solo genera el canvas la primera vez.
+- **`src/entities/player.ts`** — el `MeshBasicMaterial` de color plano se sustituye por `{ map: getPlayerTexture(), alphaTest: 0.5 }`. `alphaTest` > `transparent` porque para pixel art binario (on/off) evitamos el overhead del sorting de alpha blending.
+- **`src/config/balance.ts`** — `PLAYER` gana `SPRITE_W: 20` y `SPRITE_H: 32`. La **collision box sigue siendo 14×28** (AABB) → el sprite es ~3 px más grande por todos lados que el hitbox, dando ese margen de perdón clásico de Metal Slug.
+- `player.syncMesh()` ahora usa `SPRITE_H / 2` para el offset vertical (el quad visual es más alto que la caja de colisión; los pies del dibujo siguen alineados con el `GROUND_Y`).
+
+**Granadas parabólicas + explosiones AoE**
+
+- **`src/entities/grenades.ts`** — `GrenadePool` (cap 16) con `InstancedMesh`. Física pura: `vy += GRAVITY*dt`, `x += vx*dt`, `y += vy*dt`. Cuando `y <= GROUND_Y` marca la granada inactiva y dispara callback `onExplode(x, y)` pasando las coords del impacto.
+- **`src/entities/explosions.ts`** — `ExplosionPool` (cap 16) **solo visual**. Cada instancia tiene `age` y `radius`. Animación half-sine: `scale = sin(age/duration · π)` → pop de 0 → 1 → 0 en 0.35 s. Mesh `PlaneGeometry(1,1)` escalado per-instancia. Separar visual de daño permite reusar el pool con el Rocket Launcher cuando llegue.
+- **`src/config/balance.ts`** — nueva sección `GRENADE` (size, gravity, throw_vx=120, throw_vy=200, pool 16, explosion radius 32) y `EXPLOSION` (duration 0.35s, pool 16). Documentado con los valores esperados del arco: apex ~36 u sobre el muzzle, aterrizaje ~94 u a la derecha, vuelo ~0.78 s.
+- **`src/config/colors.ts`** — `GRENADE: 0x9ba634` (verde-oliva metálico) y `EXPLOSION: 0xffdd80` (amarillo cálido).
+- **`src/main.ts`** rewire:
+  - `GrenadePool` y `ExplosionPool` creadas y añadidas a la escena.
+  - Entrada `wasPressed('grenade')` → `tryThrowGrenade()` (consume del stock, spawn en muzzle con arc configurado).
+  - `grenades.update(dt, onExplode)` con callback que **atomicamente** spawnea la explosión visual + aplica `applyExplosionDamage(cx, cy)`.
+  - `applyExplosionDamage()` — cheap radius check `dx² + dy² ≤ r²`, mata todos los soldados dentro, suma score por cada kill.
+  - `explosions.update(dt)` tras las granadas para animar las activas.
+  - Reset de pools añadido a `startGame()`.
+  - `window.__game` expone ahora también `grenades` y `explosions`.
+
+#### 🧠 Decisiones arquitectónicas
+
+- **AD-016 — Sprite procedural via CanvasTexture.** Autoría en arrays de strings (1 char = 1 color key) + paleta separada. Ventajas: versionable, diffeable, sin dependencias externas, cero HTTP. Contrapartida: pixel-art laborioso a mano; aceptable mientras el juego tenga pocos sprites. Cuando crezca, migraremos a un editor externo + export JSON.
+- **AD-017 — Collision box más pequeña que el sprite (14×28 vs 20×32).** ~3 px de margen por lado. Metal Slug hace exactamente esto. Requiere guardar ambas dimensiones en `PLAYER` y usar cada una en su contexto (geometry vs AABB).
+- **AD-018 — ExplosionPool solo visual, damage resolved en main.** La separación permite (a) reusar el pool desde el rocket launcher sin duplicar, (b) testear visual y daño por separado, (c) evitar que la animación de la explosión mantenga "vivo" un efecto de daño que ya ocurrió instantáneamente.
+- **AD-019 — Callback `onExplode` en `grenades.update()` > array out-param.** No se aloca nada, no se necesita limpiar `.length = 0`, y el código del sitio de uso queda más lineal. Patrón que replicaremos cuando otras entidades necesiten emitir eventos discretos.
+
+#### 🐞 Problemas / Bloqueos
+
+- **Push a GitHub bloqueado por credenciales.** Documentado en `memory/git_identity.md`. Usuario resolverá con PAT + `git remote set-url` cuando cree el token. No afecta desarrollo.
+- Ningún error de compilación. Ningún bloqueante de gameplay.
+
+#### ➡️ Siguiente paso
+
+- Validación visual por el usuario:
+  - [x] Sprite del player, granadas, AoE, HUD — todo validado.
+- Siguiente elegido: **(a) Enemigo escudo + tanqueta** (refactor a EnemyPool genérico).
+
+---
+
+### [2026-04-12] — Enemy pool genérico (soldier / shield / tank) + type distribution
+
+**Estado general:** 🟢 verde
+**`tsc --noEmit`:** ✅ limpio
+
+#### ✅ Hecho
+
+**Refactor a EnemyPool config-driven**
+
+- **`src/entities/enemies/enemyPool.ts`** (nuevo, reemplaza `soldier.ts`):
+  - Clase `EnemyPool` única que recibe un `EnemyConfig` y se instancia 3 veces (uno por tipo).
+  - `EnemyConfig` incluye: `label`, `width`, `height`, `speed`, `hesitateChance`, `color`, `hp`, `score`, `blocksFrontalBullets`, `poolCapacity`.
+  - `EnemyData` ahora lleva `hp` para soportar enemigos multi-hit (tanqueta).
+  - Nuevo método `damageAt(i, amount)` que decrementa HP y devuelve `true` si mató al enemigo en ese hit. `killAt()` eliminado — todo pasa por `damageAt`.
+  - IA de hesitación + despawn fuera de pantalla idéntica al anterior `SoldierPool`; solo los parámetros cambian por tipo.
+- **`src/entities/enemies/soldier.ts`** eliminado (git lo verá como rename soldier → enemyPool).
+
+**Configuración de los 3 tipos (`src/config/balance.ts`)**
+
+- `ENEMY.BULLET_DAMAGE = 1` y `ENEMY.EXPLOSION_DAMAGE = 4` centralizan el daño → tanqueta con 12 HP muere en **3 explosiones** (4+4+4=12) o **12 balas de pistola**, coincide con el GDD.
+- `ENEMY.SOLDIER`: 12×26, speed 35, 1 HP, 100 pts, hesitate 35%, pool 128.
+- `ENEMY.SHIELD`: 14×28, speed 22 (más lento), 1 HP, **200 pts** (2×), hesitate 20%, pool 32, **`BLOCKS_FRONTAL_BULLETS: true`**.
+- `ENEMY.TANK`: 36×22 (gigante y chato), speed 15 (crawl), **12 HP**, **500 pts** (5×), hesitate 10%, pool 8.
+- `SCORE.SOLDIER` eliminado — cada tipo trae su score en su config.
+
+**Distribución de tipos deslizante (`SPAWN.TYPE_*`)**
+
+- `SPAWN.TYPE_START = { soldier: 0.90, shield: 0.09, tank: 0.01 }` — early game dominado por rasos.
+- `SPAWN.TYPE_CAP = { soldier: 0.70, shield: 0.20, tank: 0.10 }` — end game con más escudos y tanquetas.
+- `SPAWN.TYPE_RAMP_TIME = 180` segundos para llegar al cap.
+- Selección con `lerp()` de ambas probabilidades y acumulado `r < pS ? soldier : r < pS+pSh ? shield : tank`. Random uniforme.
+
+**`src/systems/spawnSystem.ts`** rewritten:
+
+- Constructor toma **3 pools** (`soldiers`, `shields`, `tanks`).
+- `pickPool()` privado hace la selección ponderada por tiempo transcurrido.
+- `spawnOne()` delega a `pool.spawn()` usando el width de la config del tipo elegido (así los tanques spawnean más a la derecha que los rasos).
+- `SpawnSystem.reset()` sin cambios — el estado del sistema ya estaba centralizado.
+
+**`src/main.ts`** rewire masivo:
+
+- 3 configs locales: `SOLDIER_CONFIG`, `SHIELD_CONFIG`, `TANK_CONFIG`, derivadas de `ENEMY.*` + `COLORS.ENEMY_*`.
+- 3 pools creados y añadidos al scene graph.
+- **`enemyPools: readonly EnemyPool[] = [soldiers, shields, tanks]`** como array uniforme para las 3 pasadas de colisión.
+- **`resolveBulletEnemyHits()`** ahora itera los 3 pools dentro del loop de balas con un `continue bulletLoop` (etiqueta) para que cada bala se consuma al primer impacto.
+  - Si el pool tiene `blocksFrontalBullets`, la bala se consume (`killAt`) pero NO se aplica damageAt → escudo inmune frontal.
+- **`resolvePlayerEnemyHits()`** itera los 3 pools. Player vs CUALQUIER enemigo → game over.
+- **`applyExplosionDamage(cx, cy)`** recorre los 3 pools, aplica `EXPLOSION_DAMAGE` a los que caigan en el radio. Score se atribuye usando `pool.config.score`, así el tipo correcto cobra.
+- **`resetAllPools()`** nueva helper para el startGame — limpia soldados, shields, tanks, bullets, grenades, explosions de golpe.
+- `enemyBox` AABB reutilizable ahora tiene `w` y `h` que se setean por pool en cada pasada (antes eran fijos para soldier).
+- `window.__game` expone ahora también `shields` y `tanks`.
+
+#### 🧠 Decisiones arquitectónicas
+
+- **AD-020 — Una sola clase `EnemyPool` configurable.** Los 3 tipos comparten estructura (InstancedMesh + data[] + walk-hesitate AI) y solo difieren en parámetros. Clase genérica > 3 clases duplicadas. Si en el futuro un tipo necesita lógica especial (p.ej. tanqueta disparando bola rodante), se hereda o se añade un hook sin reescribir toda la base.
+- **AD-021 — Damage model vía `damageAt(i, amount)`.** Unifica kill instantáneo (soldier/shield, HP=1) y multi-hit (tank, HP=12). Centraliza `BULLET_DAMAGE` y `EXPLOSION_DAMAGE` como constantes del módulo ENEMY. Ataques futuros (melee, cuchillo) solo necesitan su propio valor de damage.
+- **AD-022 — Blocking de balas como flag de config, no clase diferente.** El escudo no es un tipo distinto que herede de soldier — es un `EnemyPool` con `blocksFrontalBullets: true`. La lógica vive en `main.ts/resolveBulletEnemyHits` (cliente) en vez de en el pool (servidor) porque es una decisión de juego, no de entidad. El pool no sabe "cómo" se le hace daño — solo que le han llamado `damageAt`.
+- **AD-023 — Score atribuido por pool.config.score, no por una tabla global.** El pool sabe cuánto valen sus instancias. El cliente colisiona con `if (pool.damageAt(...)) state.score += pool.config.score`. Centraliza el balance en `balance.ts` (una sola fuente de verdad).
+- **AD-024 — Selección de tipo en spawn: lerp lineal + acumulado uniforme.** Misma técnica que Hearthstone, League, Risk of Rain. Simple, determinista en cuanto a la curva, random en cuanto al resultado. Futuro pity system para drops usará la misma base.
+
+#### 🐞 Problemas / Bloqueos
+
+- Ninguno. Typecheck limpio. Git push sigue bloqueado por credenciales (documentado en `memory/git_identity.md`).
+
+#### 🎨 Pendiente de polish
+
+- **Enemigos siguen siendo rectángulos de color plano** (12×26 rojo, 14×28 azul-acero, 36×22 oliva). Son distinguibles por tamaño y color, pero visualmente chirrían contra el player pixel-art. La siguiente pasada de sprites procedurales debería cubrirlos (candidate milestone futuro).
+
+#### ➡️ Siguiente paso
+
+- Validación visual por el usuario:
+  - [ ] Los primeros ~30 s solo aparecen soldados rojos (90% raso al inicio).
+  - [ ] A partir de ~1 min empiezan a verse rectángulos azul-acero (shields) más grandes y lentos.
+  - [ ] Shields NO mueren con balas — hay que lanzarles una granada.
+  - [ ] Tanquetas (rectángulos oliva enormes, 36 u de ancho) aparecen ocasionalmente (más frecuentes conforme pasa el tiempo).
+  - [ ] Tanqueta aguanta varias balas (~12) o 3 explosiones.
+  - [ ] Score por kill: raso 100, escudo 200, tanqueta 500.
+- Siguiente hito propuesto (continuando el orden): **(b) Melee automático** en colisión con la pistola — si disparas estando pegado a un enemigo, sale un ataque cuerpo a cuerpo automático (ahorra bala, mata al enemigo). GDD lo describe textualmente.
 
 ---
