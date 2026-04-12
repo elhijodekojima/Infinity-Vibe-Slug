@@ -1,0 +1,12 @@
+node_modules
+dist
+dist-ssr
+.DS_Store
+*.log
+.vercel
+.env
+.env.local
+*.tsbuildinfo
+
+# Claude Code worktrees and session state — never committed
+.claude/
