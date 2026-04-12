@@ -67,10 +67,14 @@ export class ExplosionPool {
     return false;
   }
 
-  update(dt: number): void {
+  update(dt: number, scrollSpeed: number): void {
     for (let i = 0; i < this.capacity; i++) {
       const d = this.data[i]!;
       if (!d.active) continue;
+
+      // World scroll: explosions follow the ground
+      d.x -= scrollSpeed * dt;
+
       d.age += dt;
       if (d.age >= EXPLOSION.DURATION) {
         d.active = false;

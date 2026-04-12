@@ -17,6 +17,7 @@ export const COLORS = {
   BULLET_ENEMY: 0xff6060,
   GRENADE: 0x9ba634,
   EXPLOSION: 0xffdd80,
+  ROCKET: 0xffa040,
   ACCENT: 0xffd86a,
   DANGER: 0xd04040,
 } as const;

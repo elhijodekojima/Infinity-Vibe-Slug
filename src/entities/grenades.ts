@@ -75,10 +75,13 @@ export class GrenadePool {
    * the ground this frame. The grenade is already marked inactive by the
    * time the callback fires, and `d.y` has been clamped to `GROUND_Y`.
    */
-  update(dt: number, onExplode: (x: number, y: number) => void): void {
+  update(dt: number, scrollSpeed: number, onExplode: (x: number, y: number) => void): void {
     for (let i = 0; i < this.capacity; i++) {
       const d = this.data[i]!;
       if (!d.active) continue;
+
+      // World scroll: projectiles in flight should follow the world
+      d.x -= scrollSpeed * dt;
 
       d.vy += GRENADE.GRAVITY * dt;
       d.x += d.vx * dt;

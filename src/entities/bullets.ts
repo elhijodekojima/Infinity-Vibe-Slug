@@ -19,17 +19,22 @@ export interface BulletData {
   y: number;
   /** Horizontal velocity (u/s). */
   vx: number;
+  /** Vertical velocity (u/s). */
+  vy: number;
+  /** If true, this bullet doesn't die on hit. */
+  penetrates: boolean;
+  /** Distance traveled in world units. */
+  dist: number;
+  /** Max distance before deactivating (controlled by weapon). */
+  range: number;
+  /** Unique ID of the trigger pull that spawned this projectile. */
+  shotId: number;
+  /** Damage dealt by this bullet. */
+  damage: number;
 }
 
 /**
  * Player bullet pool — zero runtime allocation.
- *
- * One `InstancedMesh` backs up to `capacity` bullets. Active entries are
- * packed into the first N instance slots every frame and `mesh.count` is
- * updated so only active instances hit the GPU.
- *
- * Spawns reuse the first inactive slot; if the pool is full the spawn is
- * silently dropped (shouldn't happen with a sensible POOL_CAPACITY).
  */
 export class BulletPool {
   public readonly mesh: InstancedMesh;
@@ -48,12 +53,23 @@ export class BulletPool {
 
     this.data = new Array(capacity);
     for (let i = 0; i < capacity; i++) {
-      this.data[i] = { active: false, x: 0, y: 0, vx: 0 };
+      this.data[i] = {
+        active: false,
+        x: 0,
+        y: 0,
+        vx: 0,
+        vy: 0,
+        penetrates: false,
+        dist: 0,
+        range: Infinity,
+        shotId: -1,
+        damage: 1,
+      };
     }
   }
 
   /** Fire a new bullet. Returns false if the pool is saturated. */
-  spawn(x: number, y: number, vx: number): boolean {
+  spawn(x: number, y: number, vx: number, vy = 0, penetrates = false, range = Infinity, shotId = -1, damage = 1): boolean {
     for (let i = 0; i < this.capacity; i++) {
       const d = this.data[i]!;
       if (!d.active) {
@@ -61,6 +77,12 @@ export class BulletPool {
         d.x = x;
         d.y = y;
         d.vx = vx;
+        d.vy = vy;
+        d.penetrates = penetrates;
+        d.dist = 0;
+        d.range = range;
+        d.shotId = shotId;
+        d.damage = damage;
         return true;
       }
     }
@@ -71,8 +93,14 @@ export class BulletPool {
     for (let i = 0; i < this.capacity; i++) {
       const d = this.data[i]!;
       if (!d.active) continue;
-      d.x += d.vx * dt;
-      if (d.x > cameraRight + 16 || d.x < -16) {
+
+      const dx = d.vx * dt;
+      const dy = d.vy * dt;
+      d.x += dx;
+      d.y += dy;
+      d.dist += Math.sqrt(dx * dx + dy * dy);
+
+      if (d.x > cameraRight + 32 || d.x < -32 || d.y < -100 || d.y > 600 || d.dist > d.range) {
         d.active = false;
       }
     }

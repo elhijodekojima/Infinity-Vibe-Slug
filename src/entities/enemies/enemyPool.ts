@@ -3,6 +3,7 @@ import {
   PlaneGeometry,
   MeshBasicMaterial,
   Object3D,
+  Texture,
 } from 'three';
 
 /**
@@ -35,6 +36,12 @@ export interface EnemyConfig {
   readonly blocksFrontalBullets: boolean;
   /** Max concurrent instances of this type. */
   readonly poolCapacity: number;
+  /** If true, this unit takes no damage from melee attacks. */
+  readonly poolCapacity: number;
+  /** If true, this unit takes no damage from melee attacks. */
+  readonly isMeleeImmune: boolean;
+  /** Sprite texture (optional). */
+  readonly map?: Texture;
 }
 
 export interface EnemyData {
@@ -49,6 +56,8 @@ export interface EnemyData {
   thinkTimer: number;
   /** Seconds of hesitation remaining (movement frozen while > 0). */
   hesitatingFor: number;
+  /** Tracks the ID of the last projectile shot that hit this enemy. */
+  lastShotIdHit: number;
 }
 
 /**
@@ -73,7 +82,12 @@ export class EnemyPool {
     this.config = config;
 
     const geom = new PlaneGeometry(config.width, config.height);
-    const mat = new MeshBasicMaterial({ color: config.color });
+    const mat = new MeshBasicMaterial({ 
+      color: config.color,
+      map: config.map || null,
+      transparent: !!config.map,
+      alphaTest: 0.5, // Standard for crisp pixel cutouts
+    });
     this.mesh = new InstancedMesh(geom, mat, config.poolCapacity);
     this.mesh.count = 0;
     this.mesh.frustumCulled = false;
@@ -102,6 +116,7 @@ export class EnemyPool {
         d.hp = this.config.hp;
         d.thinkTimer = 1 + Math.random() * 1.5;
         d.hesitatingFor = 0;
+        d.lastShotIdHit = -1;
         return true;
       }
     }

@@ -334,6 +334,40 @@
   - [ ] Tanquetas (rectángulos oliva enormes, 36 u de ancho) aparecen ocasionalmente (más frecuentes conforme pasa el tiempo).
   - [ ] Tanqueta aguanta varias balas (~12) o 3 explosiones.
   - [ ] Score por kill: raso 100, escudo 200, tanqueta 500.
-- Siguiente hito propuesto (continuando el orden): **(b) Melee automático** en colisión con la pistola — si disparas estando pegado a un enemigo, sale un ataque cuerpo a cuerpo automático (ahorra bala, mata al enemigo). GDD lo describe textualmente.
-
 ---
+
+### [2026-04-12] — Arsenal completo: Machinegun, Shotgun y Rocket Launcher
+
+**Estado general:** 🟢 verde
+**`tsc --noEmit`:** ✅ (validado manual, npx falló en entorno)
+
+#### ✅ Hecho
+
+- **Interfaz `Weapon`** (nuevo): Unifica el comportamiento de todas las armas (pistola, auto, semi, munición).
+- **Pistola mejorada**: Intervalo reducido de `0.5s` a `0.25s` para cumplir la petición del usuario de "doble de velocidad".
+- **Machinegun (H)** (nuevo): Fuego automático (fires while held) con 200 balas y alta cadencia (0.1s).
+- **Shotgun (S)** (nuevo): Disparo triple en cono con **penetración** de proyectiles.
+- **Rocket Launcher (R)** (nuevo): Cohetes lineales que detonan al impacto provocando daño AoE (reutiliza `ExplosionPool`).
+- **`src/entities/rockets.ts`** (nuevo): `RocketPool` específico para proyectiles explosivos.
+- **`src/entities/bullets.ts`** refactor: Soporte para velocidad horizontal/vertical y flag `penetrates` para el comportamiento de la escopeta.
+- **`src/main.ts`** rewire:
+  - Sistema de cambio de arma automático (vuelve a pistola al agotar munición especial).
+  - Lógica de fuego automático integrada en el loop principal.
+  - Resolución de colisiones específica para cohetes (detonación) y balas penetrantes.
+  - Exposición de `__game.setWeapon()` para debug manual.
+
+- **Ataque Melee Mejorado (AoE)**: El cuchillo ahora realiza un barrido que puede golpear a múltiples enemigos simultáneamente. Se ha añadido un retardo de enfunde (`HOLSTER_DELAY`) de 0.25s que impide disparar inmediatamente tras el tajo.
+- **Sistema de Anti-Multihit (`shotId`)**: Implementado un sistema de rastreo de disparos que garantiza que un enemigo solo reciba daño una vez por cada pulsación del gatillo, corrigiendo el bug donde la escopeta eliminaba tanquetas de un disparo.
+- **Ajuste de Escopeta**: Ángulo más cerrado (0.08 rad) y alcance reducido a 60 unidades para potenciar el combate cercano.
+
+#### 🧠 Decisiones arquitectónicas
+
+- **AD-025 — Penetrabilidad como flag en `BulletData`.** (Actualizado): Ahora los proyectiles penetrantes ignoran el chequeo de bloqueo de enemigos en `main.ts`, permitiendo herir a los soldados con escudo desde el frente.
+- **AD-028 — Rango dinámico por proyectil.** `BulletData` ahora incluye `dist` y `range`. Esto evita tener pools de "balas de corto alcance" y "balas de largo alcance", permitiendo que cualquier arma configure su propia distancia de vida.
+- **AD-029 — Manejo de entrada robusto.** Se ha separado la lectura de estado (`isDown`) del disparo de eventos (`wasPressed`) para garantizar que múltiples sistemas (melee y disparo) puedan responder a un mismo input de manera coherente.
+- **AD-030 — Sistema de `shotId` para coherencia de daño.** Al asignar un ID único a cada ráfaga/disparo, resolvemos de forma elegante el problema de los proyectiles que atraviesan hitboxes grandes (evitando múltiples hits por frame) y el solapamiento de perdigones de escopeta.
+- **AD-031 — Melee No-Bloqueante pero con Delay.** El ataque cuerpo a cuerpo es ahora de área (AoE), pero el `shootDelay` global introduce una penalización de tiempo necesaria para equilibrar la potencia del cuchillo frente al uso de armas de fuego.
+
+#### ➡️ Siguiente paso
+
+- Implementar el sistema de **Drops** (items que caen de enemigos) para poder obtener el arsenal de forma orgánica durante el juego.
