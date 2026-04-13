@@ -1,5 +1,5 @@
 import type { EnemyPool } from '../entities/enemies/enemyPool';
-import { SPAWN, WORLD } from '../config/balance';
+import { SPAWN, WORLD, ENEMY } from '../config/balance';
 
 /**
  * Spawn system — drives both the exponential SPAWN RATE curve and the
@@ -25,6 +25,7 @@ export class SpawnSystem {
     private readonly soldiers: EnemyPool,
     private readonly shields: EnemyPool,
     private readonly tanks: EnemyPool,
+    private readonly helicopters: any, // Using any for now to avoid import loop or just import HelicopterPool
   ) {}
 
   update(dt: number, cameraRight: number): void {
@@ -54,24 +55,31 @@ export class SpawnSystem {
     return 1 / Math.max(0.001, rate);
   }
 
-  /** Picks one of the three pools based on the sliding type distribution. */
-  private pickPool(): EnemyPool {
+  /** Picks one of the four pools based on the sliding type distribution. */
+  private pickPool(): { pool: any, type: 'ground' | 'air' } {
     const t = Math.min(1, this.elapsed / SPAWN.TYPE_RAMP_TIME);
     const pSoldier = lerp(SPAWN.TYPE_START.soldier, SPAWN.TYPE_CAP.soldier, t);
     const pShield  = lerp(SPAWN.TYPE_START.shield,  SPAWN.TYPE_CAP.shield,  t);
-    // pTank is implicit: 1 - pSoldier - pShield.
+    const pTank    = lerp(SPAWN.TYPE_START.tank,    SPAWN.TYPE_CAP.tank,    t);
+    // pHeli is implicit: 1 - sum(others)
 
     const r = Math.random();
-    if (r < pSoldier) return this.soldiers;
-    if (r < pSoldier + pShield) return this.shields;
-    return this.tanks;
+    if (r < pSoldier) return { pool: this.soldiers, type: 'ground' };
+    if (r < pSoldier + pShield) return { pool: this.shields, type: 'ground' };
+    if (r < pSoldier + pShield + pTank) return { pool: this.tanks, type: 'ground' };
+    return { pool: this.helicopters, type: 'air' };
   }
 
   private spawnOne(cameraRight: number): void {
-    const pool = this.pickPool();
+    const { pool, type } = this.pickPool();
     // Spawn just off the right edge of the visible frustum.
     const spawnX = cameraRight + pool.config.width;
-    pool.spawn(spawnX, WORLD.GROUND_Y);
+    
+    if (type === 'ground') {
+      pool.spawn(spawnX, WORLD.GROUND_Y);
+    } else {
+      pool.spawn(spawnX, ENEMY.HELICOPTER.FLY_HEIGHT);
+    }
   }
 }
 

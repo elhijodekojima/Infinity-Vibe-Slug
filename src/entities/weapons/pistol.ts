@@ -15,9 +15,13 @@ export class Pistol implements Weapon {
     if (this.cooldown > 0) this.cooldown = Math.max(0, this.cooldown - dt);
   }
 
-  tryFire(bullets: BulletPool, muzzleX: number, muzzleY: number, shotId: number): boolean {
+  tryFire(bullets: BulletPool, muzzleX: number, muzzleY: number, shotId: number, aimAngle: number): boolean {
     if (this.cooldown > 0) return false;
-    bullets.spawn(muzzleX, muzzleY, WEAPON.PISTOL.BULLET_SPEED, 0, false, Infinity, shotId, (WEAPON.PISTOL as any).DAMAGE || 1);
+
+    const vx = Math.cos(aimAngle) * WEAPON.PISTOL.BULLET_SPEED;
+    const vy = Math.sin(aimAngle) * WEAPON.PISTOL.BULLET_SPEED;
+
+    bullets.spawn(muzzleX, muzzleY, vx, vy, false, Infinity, shotId, WEAPON.PISTOL.DAMAGE);
     this.cooldown = WEAPON.PISTOL.INTERVAL;
     return true;
   }

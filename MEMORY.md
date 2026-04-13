@@ -61,6 +61,11 @@
 **Decisión:** Render en `rAF`, simulación de juego en pasos fijos (ej: 60 Hz) con interpolación.
 **Razón:** Determinismo para el balance, independencia del framerate del navegador.
 
+### AD-032 — Mecánica de Agachado y Apuntado Multidireccional
+**Fecha:** 2026-04-13
+**Decisión:** Implementar apuntado hacia arriba (gradual) y hacia abajo (instantáneo en aire). Agacharse reduce velocidad y hitbox al 50%.
+**Razón:** Profundiza la táctica defensiva y permite atacar enemigos voladores (futuro) o vulnerables cenitalmente (escudos).
+
 ---
 
 ## 📁 Estructura de carpetas propuesta (Zero-Loading)
@@ -179,8 +184,11 @@ infinity-vibe-slug/
 
 - ✅ PASO 1: GDD leído y asimilado.
 - ✅ PASO 2: 8 archivos de gestión creados.
-- ✅ PASO 3: Arquitectura "Zero-Loading" definida (este documento).
-- ⏸️ **Pendiente autorización del usuario** para programar `index.html` + `main.ts`.
+- ✅ PASO 3: Arquitectura "Zero-Loading" definida.
+- ✅ PASO 4: Combate base, granadas y enemigos (soldier/shield/tank).
+- ✅ PASO 5: Arsenal completo y sistema de Drops.
+- ✅ PASO 6: Acrobacias (Crouch, Aim Up/Down) y remapa de controles.
+- ⏸️ **Pendiente:** Implementación de enemigos voladores y efectos de sonido.
 
 ---
 

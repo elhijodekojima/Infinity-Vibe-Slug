@@ -14,7 +14,7 @@ export interface Weapon {
   /** Update cooldowns every frame. */
   tickCooldown(dt: number): void;
   /** Try to spawn projectiles. Returns true if successful. */
-  tryFire(bullets: BulletPool, muzzleX: number, muzzleY: number, shotId: number): boolean;
+  tryFire(bullets: BulletPool, muzzleX: number, muzzleY: number, shotId: number, aimAngle: number): boolean;
   /** Add ammo to the reserve. */
   addAmmo(count: number): void;
   /** Reset to start-of-game or fresh-drop state. */

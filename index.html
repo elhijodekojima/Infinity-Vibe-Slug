@@ -9,8 +9,11 @@
 /* Critical CSS — inlined for instant first paint. NO external stylesheets. */
 html,body{margin:0;padding:0;height:100%;background:#0a0a0f;color:#e8e4d4;font:14px/1.3 ui-monospace,Menlo,Consolas,monospace;overflow:hidden;user-select:none;-webkit-tap-highlight-color:transparent}
 #c{position:fixed;inset:0;display:block;width:100%;height:100%;image-rendering:pixelated;image-rendering:crisp-edges;background:#0a0a0f}
-#hud{position:fixed;top:0;left:0;right:0;padding:12px 16px;display:flex;justify-content:space-between;align-items:center;font-size:14px;letter-spacing:.08em;text-shadow:2px 2px 0 #000;pointer-events:none;z-index:2}
+#hud{position:fixed;top:0;left:0;right:0;padding:12px 16px;display:flex;justify-content:space-between;align-items:flex-start;font-size:14px;letter-spacing:.08em;text-shadow:2px 2px 0 #000;pointer-events:none;z-index:2}
 #hud span{background:rgba(0,0,0,.45);padding:4px 10px;border:1px solid #2a2a35;border-radius:2px}
+.hud-left,.hud-right{display:flex;flex-direction:column;gap:4px}
+.hud-center{display:flex;gap:12px;position:absolute;left:50%;top:12px;transform:translateX(-50%);align-items:center}
+.hud-right{align-items:flex-end}
 .panel{position:fixed;inset:0;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:14px;background:rgba(8,8,12,.9);z-index:3;text-align:center;padding:20px;box-sizing:border-box}
 .panel h1{font-size:28px;margin:0;letter-spacing:.12em;color:#ffd86a;text-shadow:3px 3px 0 #000}
 .panel p{margin:0;opacity:.7;font-size:12px;letter-spacing:.1em}
@@ -26,9 +29,16 @@ html,body{margin:0;padding:0;height:100%;background:#0a0a0f;color:#e8e4d4;font:1
 <canvas id="c"></canvas>
 
 <div id="hud" class="hidden">
-  <span id="hud-score">SCORE 000000</span>
-  <span id="hud-weapon">PISTOL ∞</span>
-  <span id="hud-grenades">♦ 10</span>
+  <div class="hud-left">
+    <span id="hud-score">SCORE 000000</span>
+    <span id="hud-kills">KILLS 0000</span>
+    <span id="hud-timer">00:00</span>
+  </div>
+  <div class="hud-center">
+    <span id="hud-weapon">PISTOL ∞</span>
+    <span id="hud-grenades">◆ 10</span>
+  </div>
+  <div class="hud-right"></div>
 </div>
 
 <div id="menu" class="panel">
@@ -37,12 +47,14 @@ html,body{margin:0;padding:0;height:100%;background:#0a0a0f;color:#e8e4d4;font:1
   <input id="username" maxlength="3" placeholder="AAA" autocomplete="off" spellcheck="false">
   <button id="start">INSERT COIN</button>
   <p id="highscore">HI 000000</p>
-  <p class="hint">WASD MOVE · SPACE FIRE · E GRENADE</p>
+  <p class="hint">AD MOVE · SPACE JUMP · W UP · S DOWN · J FIRE · K GRENADE</p>
 </div>
 
 <div id="gameover" class="panel hidden">
   <h1>GAME OVER</h1>
   <p id="final-score">SCORE 000000</p>
+  <p id="final-kills">KILLS 0000</p>
+  <p id="final-time">TIME 00:00</p>
   <button id="retry">RETRY</button>
 </div>
 

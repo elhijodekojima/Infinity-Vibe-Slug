@@ -10,22 +10,23 @@
  *   - "wasPressed": edge-triggered, auto-consumed on read (great for jumps).
  */
 
-export type InputAction = 'left' | 'right' | 'up' | 'down' | 'fire' | 'grenade';
+export type InputAction = 'left' | 'right' | 'up' | 'down' | 'jump' | 'fire' | 'grenade';
 
 const KEY_MAP: Record<string, InputAction> = {
   KeyA: 'left',
   KeyD: 'right',
   KeyW: 'up',
   KeyS: 'down',
-  Space: 'fire',
-  KeyE: 'grenade',
+  Space: 'jump',
+  KeyJ: 'fire',
+  KeyK: 'grenade',
   ArrowLeft: 'left',
   ArrowRight: 'right',
   ArrowUp: 'up',
   ArrowDown: 'down',
 };
 
-const ACTIONS: InputAction[] = ['left', 'right', 'up', 'down', 'fire', 'grenade'];
+const ACTIONS: InputAction[] = ['left', 'right', 'up', 'down', 'jump', 'fire', 'grenade'];
 
 export class Input {
   private held: Record<InputAction, boolean>;

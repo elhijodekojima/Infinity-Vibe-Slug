@@ -20,20 +20,20 @@ export class Shotgun implements Weapon {
     if (this.cooldown > 0) this.cooldown = Math.max(0, this.cooldown - dt);
   }
 
-  tryFire(bullets: BulletPool, muzzleX: number, muzzleY: number, shotId: number): boolean {
+  tryFire(bullets: BulletPool, muzzleX: number, muzzleY: number, shotId: number, aimAngle: number): boolean {
     if (this.cooldown > 0 || this._ammo <= 0) return false;
 
     const speed = WEAPON.SHOTGUN.BULLET_SPEED;
     const spread = WEAPON.SHOTGUN.SPREAD;
     const range = WEAPON.SHOTGUN.RANGE;
-    const damage = (WEAPON.SHOTGUN as any).DAMAGE || 2;
+    const damage = WEAPON.SHOTGUN.DAMAGE;
 
     // Center shot
-    bullets.spawn(muzzleX, muzzleY, speed, 0, true, range, shotId, damage);
-    // Up shot
-    bullets.spawn(muzzleX, muzzleY, speed * Math.cos(spread), speed * Math.sin(spread), true, range, shotId, damage);
-    // Down shot
-    bullets.spawn(muzzleX, muzzleY, speed * Math.cos(-spread), speed * Math.sin(-spread), true, range, shotId, damage);
+    bullets.spawn(muzzleX, muzzleY, speed * Math.cos(aimAngle), speed * Math.sin(aimAngle), true, range, shotId, damage);
+    // Upper shot in the cone
+    bullets.spawn(muzzleX, muzzleY, speed * Math.cos(aimAngle + spread), speed * Math.sin(aimAngle + spread), true, range, shotId, damage);
+    // Lower shot in the cone
+    bullets.spawn(muzzleX, muzzleY, speed * Math.cos(aimAngle - spread), speed * Math.sin(aimAngle - spread), true, range, shotId, damage);
 
     this._ammo--;
     this.cooldown = WEAPON.SHOTGUN.INTERVAL;

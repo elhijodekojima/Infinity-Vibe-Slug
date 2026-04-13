@@ -20,10 +20,13 @@ export class Machinegun implements Weapon {
     if (this.cooldown > 0) this.cooldown = Math.max(0, this.cooldown - dt);
   }
 
-  tryFire(bullets: BulletPool, muzzleX: number, muzzleY: number, shotId: number): boolean {
+  tryFire(bullets: BulletPool, muzzleX: number, muzzleY: number, shotId: number, aimAngle: number): boolean {
     if (this.cooldown > 0 || this._ammo <= 0) return false;
 
-    const ok = bullets.spawn(muzzleX, muzzleY, WEAPON.MACHINEGUN.BULLET_SPEED, 0, false, Infinity, shotId, (WEAPON.MACHINEGUN as any).DAMAGE || 1);
+    const vx = Math.cos(aimAngle) * WEAPON.MACHINEGUN.BULLET_SPEED;
+    const vy = Math.sin(aimAngle) * WEAPON.MACHINEGUN.BULLET_SPEED;
+
+    const ok = bullets.spawn(muzzleX, muzzleY, vx, vy, false, Infinity, shotId, WEAPON.MACHINEGUN.DAMAGE);
     if (ok) {
       this._ammo--;
       this.cooldown = WEAPON.MACHINEGUN.INTERVAL;

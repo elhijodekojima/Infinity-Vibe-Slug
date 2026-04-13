@@ -18,6 +18,8 @@ export interface ItemData {
   vy: number;
   /** Seconds since spawn. */
   age: number;
+  /** If true, falls slower and is collectible in air. */
+  hasParachute: boolean;
 }
 
 /**
@@ -66,7 +68,7 @@ export class ItemPool {
 
     this.data = new Array(capacity);
     for (let i = 0; i < capacity; i++) {
-      this.data[i] = { active: false, type: 'machinegun', x: 0, y: 0, vy: 0, age: 0 };
+      this.data[i] = { active: false, type: 'machinegun', x: 0, y: 0, vy: 0, age: 0, hasParachute: false };
     }
   }
 
@@ -75,7 +77,7 @@ export class ItemPool {
     return [this.meshMG, this.meshSG, this.meshRL, this.meshGR];
   }
 
-  spawn(x: number, y: number, type: ItemType): boolean {
+  spawn(x: number, y: number, type: ItemType, hasParachute = false): boolean {
     for (let i = 0; i < this.capacity; i++) {
       const d = this.data[i]!;
       if (!d.active) {
@@ -83,8 +85,9 @@ export class ItemPool {
         d.type = type;
         d.x = x;
         d.y = y;
-        d.vy = 100; // Small upward pop
+        d.vy = hasParachute ? -30 : 100; // Slower fall or pop up
         d.age = 0;
+        d.hasParachute = hasParachute;
         return true;
       }
     }
@@ -98,7 +101,13 @@ export class ItemPool {
 
       d.age += dt;
       d.x -= scrollSpeed * dt;
-      d.vy += DROP.GRAVITY * dt;
+      // Parachute slows gravity impact
+      const gravity = d.hasParachute ? DROP.GRAVITY * 0.2 : DROP.GRAVITY;
+      d.vy += gravity * dt;
+      
+      // Cap fall speed with parachute
+      if (d.hasParachute && d.vy < -40) d.vy = -40;
+
       d.y += d.vy * dt;
 
       if (d.y < WORLD.GROUND_Y) {

@@ -26,10 +26,14 @@ export const PLAYER = {
   SPRITE_H: 32,
   /** Horizontal move speed in world units / second. */
   MOVE_SPEED: 90,
+  /** Speed while crouching (halved). */
+  CROUCH_MOVE_SPEED: 45,
   /** Initial upward velocity on jump (units / second). */
-  JUMP_VELOCITY: 220,
+  JUMP_VELOCITY: 330,
   /** Gravity in units / second^2. */
   GRAVITY: -620,
+  /** Speed of aiming transition (radians / sec). ~0.15s to reach 90deg. */
+  AIM_SPEED: 10,
   START_X: 80,
   START_GRENADES: 10,
   MAX_GRENADES: 30,
@@ -60,7 +64,7 @@ export const ENEMY = {
   SOLDIER: {
     WIDTH: 12,
     HEIGHT: 26,
-    SPEED: 35,
+    SPEED: 45,          // Half of PLAYER.MOVE_SPEED (90)
     HESITATE_CHANCE: 0.35,
     HP: 1,
     SCORE: 100,
@@ -75,7 +79,7 @@ export const ENEMY = {
   SHIELD: {
     WIDTH: 14,
     HEIGHT: 28,
-    SPEED: 22,
+    SPEED: 34,          // 25% slower than SOLDIER (45 * 0.75 ≈ 34)
     HESITATE_CHANCE: 0.2,
     HP: 1,
     SCORE: 200,
@@ -88,15 +92,41 @@ export const ENEMY = {
    * Tank (tanqueta). Big, slow, tanky (12 HP).
    */
   TANK: {
-    WIDTH: 36,
-    HEIGHT: 22,
-    SPEED: 15,
-    HESITATE_CHANCE: 0.1,
+    WIDTH: 54,
+    HEIGHT: 33,
+    SPEED: 12,          // Always advancing, very slow
+    HESITATE_CHANCE: 0.0, // Tank never hesitates — always rolls forward
     HP: 12,
     SCORE: 500,
     BLOCKS_FRONTAL_BULLETS: false,
     POOL_CAPACITY: 8,
     IS_MELEE_IMMUNE: true,
+  },
+
+  /**
+   * Helicopter. High altitude, inert movements, drops bombs.
+   */
+  HELICOPTER: {
+    WIDTH: 54,  // Same as Tank
+    HEIGHT: 33, // Same as Tank
+    FLY_HEIGHT: 270,  // Above max jump height (~148 from ground): JUMP_V²/(2·G) = 330²/1240 ≈ 88 + GROUND_Y 60 = 148
+    SPEED: 85,  // Fast, similar to player
+    HP: 12,     // Same as Tank — tough target
+    SCORE: 1000,
+    POOL_CAPACITY: 4,
+  },
+
+  BOMB: {
+    SIZE: 14,           // ~Size of player head sprite (~6px → ~14 world units)
+    SPEED: 200,         // Vertical fall speed
+    DAMAGE: 4,
+    EXPLOSION_RADIUS: 24,
+  },
+
+  CANNONBALL: {
+    SIZE: 14,           // Same visible size as bomb
+    SPEED: 60,
+    DAMAGE: 2,
   },
 } as const;
 
@@ -105,6 +135,12 @@ export const BULLET = {
     WIDTH: 6,
     HEIGHT: 2,
     SPEED: 320,
+    POOL_CAPACITY: 64,
+  },
+  ENEMY: {
+    WIDTH: 4,
+    HEIGHT: 4,
+    SPEED: 120,
     POOL_CAPACITY: 64,
   },
 } as const;
@@ -162,8 +198,8 @@ export const SPAWN = {
   RATE_CAP: 4,
   INITIAL_DELAY: 1.5,
   TYPE_RAMP_TIME: 180,
-  TYPE_START: { soldier: 0.90, shield: 0.09, tank: 0.01 },
-  TYPE_CAP:   { soldier: 0.70, shield: 0.20, tank: 0.10 },
+  TYPE_START: { soldier: 0.85, shield: 0.09, tank: 0.05, helicopter: 0.01 },
+  TYPE_CAP:   { soldier: 0.65, shield: 0.20, tank: 0.10, helicopter: 0.05 },
 } as const;
 
 export const GRENADE = {

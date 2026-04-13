@@ -12,6 +12,7 @@ export interface RocketData {
   x: number;
   y: number;
   vx: number;
+  vy: number;
 }
 
 /**
@@ -35,11 +36,11 @@ export class RocketPool {
 
     this.data = new Array(capacity);
     for (let i = 0; i < capacity; i++) {
-      this.data[i] = { active: false, x: 0, y: 0, vx: 0 };
+      this.data[i] = { active: false, x: 0, y: 0, vx: 0, vy: 0 };
     }
   }
 
-  spawn(x: number, y: number, vx: number): boolean {
+  spawn(x: number, y: number, vx: number, vy = 0): boolean {
     for (let i = 0; i < this.capacity; i++) {
       const d = this.data[i]!;
       if (!d.active) {
@@ -47,6 +48,7 @@ export class RocketPool {
         d.x = x;
         d.y = y;
         d.vx = vx;
+        d.vy = vy;
         return true;
       }
     }
@@ -58,9 +60,20 @@ export class RocketPool {
     for (let i = 0; i < this.capacity; i++) {
       const d = this.data[i]!;
       if (!d.active) continue;
-      d.vx += acc * dt;
+
+      // Accelerate along current velocity vector
+      const speed = Math.sqrt(d.vx * d.vx + d.vy * d.vy);
+      if (speed > 0) {
+        const nx = d.vx / speed;
+        const ny = d.vy / speed;
+        d.vx += nx * acc * dt;
+        d.vy += ny * acc * dt;
+      }
+
       d.x += d.vx * dt;
-      if (d.x > cameraRight + 32 || d.x < -32) {
+      d.y += d.vy * dt;
+
+      if (d.x > cameraRight + 32 || d.x < -32 || d.y < -100 || d.y > 600) {
         d.active = false;
       }
     }
@@ -83,7 +96,11 @@ export class RocketPool {
     for (let i = 0; i < this.capacity; i++) {
       const d = this.data[i]!;
       if (!d.active) continue;
+      
       this.dummy.position.set(d.x, d.y, 0);
+      // Face velocity vector
+      this.dummy.rotation.z = Math.atan2(d.vy, d.vx);
+      
       this.dummy.updateMatrix();
       this.mesh.setMatrixAt(idx, this.dummy.matrix);
       idx++;

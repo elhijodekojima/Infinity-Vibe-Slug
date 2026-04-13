@@ -33,12 +33,12 @@
 
 | Mecánica | Detalle |
 |----------|---------|
-| **Disparo** | Semi-automático con cadencia fija. Machacar el botón dispara rápido, pero **no por encima de la cadencia máxima** (ej: 2 disparos/s aunque haya 3 inputs). |
-| **Melee automático** | Si el jugador dispara colisionando con un enemigo, el sprite hace **cuerpo a cuerpo** en lugar de disparar (ahorra munición). |
-| **Salto** | Altura ≈ **3× la altura del sprite**. |
-| **Movimiento** | Horizontal izquierda/derecha; el sprite **nunca rota** (siempre mira a la derecha). *Tricky*: el mundo se mueve hacia el jugador. |
-| **Granada** | Stock inicial: **10**. Trayectoria parabólica, daño AoE, **más daño que una bala**. |
-| **Agacharse** *(opcional)* | Esquivar balas / disparar hacia abajo en salto. Evaluar su encaje con el auto-scroll. |
+| **Disparo** | Semi-automático con cadencia fija. `J` para disparar. Durante un salto, si se aguanta `S`, el disparo es vertical hacia abajo. |
+| **Melee automático** | Si el jugador dispara colisionando con un enemigo, el sprite hace **cuerpo a cuerpo** en lugar de disparar. |
+| **Salto** | Altura ≈ **4.5× la altura del sprite**. `Space` para saltar. |
+| **Movimiento** | `A`/`D` para horizontal. `S` para **agacharse** en suelo (hitbox reducida, velocidad 50%). |
+| **Apuntado** | `W` para apuntar arriba (transición gradual). `S` en aire para apuntar abajo (instantáneo). |
+| **Granada** | `K` para lanzar. Parabólica por defecto, recta hacia abajo si se apunta al suelo en salto. |
 
 ---
 
@@ -187,8 +187,8 @@
 
 - Ambos se **atraviesan** entre sí y entre sus balas.
 - **Local co-op (2 jugadores, 1 teclado):**
-  - **Jugador 1:** `WASD` (mov/salto/crouch) + `Space` (disparo) + `E` (granada).
-  - **Jugador 2:** `Flechas` + `NumPad 0` (disparo) + `NumPad .` (granada).
+  - **Jugador 1:** `AD` (move) + `Space` (jump) + `W` (up) + `S` (down) + `J` (fire) + `K` (grenade).
+  - **Jugador 2:** `Flechas` + `NumPad 0` (jump) + `NumPad 1` (fire) + `NumPad 2` (grenade) + `NumPad 5/8` (up/down).
 - No requiere retocar escalado (la cantidad de enemigos compensa).
 - **Sí** requiere ajustar drop rates para 2P.
 

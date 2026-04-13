@@ -37,8 +37,6 @@ export interface EnemyConfig {
   /** Max concurrent instances of this type. */
   readonly poolCapacity: number;
   /** If true, this unit takes no damage from melee attacks. */
-  readonly poolCapacity: number;
-  /** If true, this unit takes no damage from melee attacks. */
   readonly isMeleeImmune: boolean;
   /** Sprite texture (optional). */
   readonly map?: Texture;
@@ -58,6 +56,21 @@ export interface EnemyData {
   hesitatingFor: number;
   /** Tracks the ID of the last projectile shot that hit this enemy. */
   lastShotIdHit: number;
+  /** Seconds until this enemy can fire its weapon. */
+  shootTimer: number;
+  /** If > 0, enemy has stopped to aim and will fire when this reaches 0. */
+  preFireTimer: number;
+  /** If > 0, enemy is "executing" a melee attack. Player dies if they stay in range frontally. */
+  meleeTimer: number;
+  /**
+   * Active movement state:
+   * - 'approach': enemy walks toward player (leftward in world coords).
+   * - 'idle':     enemy holds world-position (camera scroll still drifts
+   *               them left on-screen, so they never truly stand still
+   *               from the player's perspective).
+   * Tanks ignore this field — they always approach.
+   */
+  behaviorState: 'approach' | 'idle';
 }
 
 /**
@@ -101,6 +114,11 @@ export class EnemyPool {
         hp: 0,
         thinkTimer: 0,
         hesitatingFor: 0,
+        lastShotIdHit: -1,
+        shootTimer: 0,
+        preFireTimer: 0,
+        meleeTimer: 0,
+        behaviorState: 'approach',
       };
     }
   }
@@ -117,28 +135,89 @@ export class EnemyPool {
         d.thinkTimer = 1 + Math.random() * 1.5;
         d.hesitatingFor = 0;
         d.lastShotIdHit = -1;
+        d.shootTimer = 1.0 + Math.random() * 2.0;
+        d.preFireTimer = 0;
+        d.meleeTimer = 0;
+        // Tanks start approaching immediately; infantry starts with a random state
+        d.behaviorState = this.config.label === 'tank' ? 'approach' : (Math.random() < 0.5 ? 'approach' : 'idle');
         return true;
       }
     }
     return false;
   }
 
-  update(dt: number): void {
-    const { speed, hesitateChance, width, poolCapacity } = this.config;
+  update(dt: number, spawnProjectile?: (x: number, y: number) => void): void {
+    const { speed, hesitateChance, width, poolCapacity, label } = this.config;
+    const activeCount = this.activeCount;
+
     for (let i = 0; i < poolCapacity; i++) {
       const d = this.data[i]!;
       if (!d.active) continue;
 
-      if (d.hesitatingFor > 0) {
+      // Melee logic timer
+      if (d.meleeTimer > 0) {
+        d.meleeTimer -= dt;
+      }
+
+      // --- Pre-fire stop: when counting down, enemy is frozen
+      if (d.preFireTimer > 0) {
+        d.preFireTimer -= dt;
+        if (d.preFireTimer <= 0 && spawnProjectile) {
+          // Stop elapsed — now actually fire
+          spawnProjectile(d.x, d.y + this.config.height * 0.6);
+        }
+        // Skip movement while aiming
+        continue;
+      }
+
+      // Shooting logic — all types fire, tanks reset timer longer
+      d.shootTimer -= dt;
+      if (d.shootTimer <= 0) {
+        // Fire rate increases with density (approx 5-25% chance per attempt)
+        const prob = 0.05 + (activeCount / poolCapacity) * 0.2;
+        if (Math.random() < prob) {
+          // Start the pre-fire pause (enemy stops to aim)
+          d.preFireTimer = 0.75;
+        }
+        // Tanks fire less frequently than infantry
+        d.shootTimer = label === 'tank'
+          ? 3.0 + Math.random() * 5.0
+          : 2.0 + Math.random() * 4.0;
+      }
+
+      // --- Movement state machine ---
+      // Pre-fire and hesitate freeze movement in all cases.
+      if (d.preFireTimer > 0 || d.hesitatingFor > 0) {
         d.hesitatingFor -= dt;
-      } else {
+      } else if (label === 'tank') {
+        // Tank ALWAYS advances. No idle, no hesitate, no stopping.
+        d.x -= speed * dt;
+      } else if (d.behaviorState === 'approach') {
+        // Active walk toward the player
         d.x -= speed * dt;
         d.thinkTimer -= dt;
         if (d.thinkTimer <= 0) {
-          d.thinkTimer = 1.2 + Math.random() * 1.8;
-          if (Math.random() < hesitateChance) {
+          const r = Math.random();
+          if (r < 0.35) {
+            // Switch to idle stance
+            d.behaviorState = 'idle';
+            d.thinkTimer = 0.8 + Math.random() * 1.5;
+          } else if (r < 0.35 + hesitateChance) {
+            // Brief hesitation pause
             d.hesitatingFor = 0.25 + Math.random() * 0.55;
+            d.thinkTimer = 1.2 + Math.random() * 1.8;
+          } else {
+            // Continue approaching
+            d.thinkTimer = 1.2 + Math.random() * 1.8;
           }
+        }
+      } else {
+        // 'idle' — enemy holds world position (camera scroll still moves them)
+        d.thinkTimer -= dt;
+        if (d.thinkTimer <= 0) {
+          // Always resume approaching after idle
+          d.behaviorState = 'approach';
+          d.thinkTimer = 1.5 + Math.random() * 2.0;
         }
       }
 

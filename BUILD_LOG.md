@@ -370,4 +370,35 @@
 
 #### ➡️ Siguiente paso
 
-- Implementar el sistema de **Drops** (items que caen de enemigos) para poder obtener el arsenal de forma orgánica durante el juego.
+---
+
+### [2026-04-13] — Overhaul de controles y acrobacias: Agachado, Apuntado y Air-to-Ground
+
+**Estado general:** 🟢 verde
+**Bundle size actual:** ≈ 52 KB ( Three.js tree-shaken + logic)
+**Tiempo a primer paint:** < 100 ms
+
+#### ✅ Hecho
+
+- **Remapeo de controles**: Nuevo esquema `AD` (mover), `Space` (saltar), `W/S` (apuntar), `J/K` (disparar/granada).
+- **Mecánica de Agachado (S)**: 
+  - Reducción de hitbox y velocidad al 50%.
+  - Sprite "comprimido" procedural.
+- **Apuntado Multidireccional**:
+  - Apuntado hacia arriba (`W`) con transición gradual (permitiendo disparos diagonales).
+  - Apuntado hacia abajo (`S` en aire) instantáneo para ataques cenitales.
+- **Ataque Aéreo (Air-to-Ground)**:
+  - Disparo vertical descendente que atraviesa la defensa de los soldados con escudo.
+  - Granadas verticales (sin arco parabólico) para ataques de precisión desde el aire.
+- **Colisiones mejoradas**: Las balas ahora desaparecen al tocar el suelo.
+- **Visuales Procedurales**: Añadidos frames específicos para mirar arriba, agacharse y aire-abajo en el generador de sprites.
+- **Ajuste de Salto**: Incremento del 50% en la potencia de salto para facilitar maniobras de ataque descendente.
+
+#### 🧠 Decisiones arquitectónicas
+
+- **AD-032 — Interpolación de Ángulo de Apuntado.** En lugar de estados discretos, el jugador tiene un `aimAngle` que interpola, permitiendo que la ráfaga de la machinegun haga un "barrido" visual y táctico.
+- **Vulnerabilidad de Escudo por Vector.** Los escudos ahora comprueban el `vy` de la bala; si viene de arriba (`vy < -100`), se ignora el bloqueo.
+
+#### ➡️ Siguiente paso
+
+- Implementar enemigos voladores que aprovechen el nuevo sistema de apuntado vertical.

@@ -5,6 +5,8 @@
 
 export interface HUDState {
   score: number;
+  kills: number;
+  sessionTime: number; // seconds
   weapon: string;
   /** Use `Infinity` for unlimited ammo (pistol). */
   ammo: number;
@@ -12,22 +14,28 @@ export interface HUDState {
 }
 
 let scoreEl: HTMLElement;
+let killsEl: HTMLElement;
+let timerEl: HTMLElement;
 let weaponEl: HTMLElement;
 let grenEl: HTMLElement;
 let rootEl: HTMLElement;
 
 export function initHUD(): void {
-  rootEl = byId('hud');
-  scoreEl = byId('hud-score');
+  rootEl   = byId('hud');
+  scoreEl  = byId('hud-score');
+  killsEl  = byId('hud-kills');
+  timerEl  = byId('hud-timer');
   weaponEl = byId('hud-weapon');
-  grenEl = byId('hud-grenades');
+  grenEl   = byId('hud-grenades');
 }
 
 export function updateHUD(state: HUDState): void {
-  scoreEl.textContent = `SCORE ${Math.floor(state.score).toString().padStart(6, '0')}`;
+  scoreEl.textContent  = `SCORE ${Math.floor(state.score).toString().padStart(6, '0')}`;
+  killsEl.textContent  = `KILLS ${state.kills.toString().padStart(4, '0')}`;
+  timerEl.textContent  = formatTime(state.sessionTime);
   const ammoStr = state.ammo === Infinity ? '∞' : state.ammo.toString();
   weaponEl.textContent = `${state.weapon} ${ammoStr}`;
-  grenEl.textContent = `♦ ${state.grenades}`;
+  grenEl.textContent   = `♦ ${state.grenades}`;
 }
 
 export function showHUD(): void {
@@ -36,6 +44,13 @@ export function showHUD(): void {
 
 export function hideHUD(): void {
   rootEl.classList.add('hidden');
+}
+
+/** Format seconds as MM:SS. */
+export function formatTime(seconds: number): string {
+  const m = Math.floor(seconds / 60).toString().padStart(2, '0');
+  const s = Math.floor(seconds % 60).toString().padStart(2, '0');
+  return `${m}:${s}`;
 }
 
 function byId(id: string): HTMLElement {

@@ -4,7 +4,7 @@ import {
   MeshBasicMaterial,
   Object3D,
 } from 'three';
-import { BULLET } from '../config/balance';
+import { BULLET, ENEMY } from '../config/balance';
 import { COLORS } from '../config/colors';
 
 /**
@@ -125,6 +125,105 @@ export class BulletPool {
       const d = this.data[i]!;
       if (!d.active) continue;
       this.dummy.position.set(d.x, d.y, 0);
+      this.dummy.updateMatrix();
+      this.mesh.setMatrixAt(idx, this.dummy.matrix);
+      idx++;
+    }
+    this.mesh.count = idx;
+    this.mesh.instanceMatrix.needsUpdate = true;
+  }
+}
+
+/**
+ * Enemy projectile pool — handles bullets, bombs, and cannonballs.
+ * Uses per-instance scaling to match different projectile sizes.
+ */
+export class EnemyBulletPool {
+  public readonly mesh: InstancedMesh;
+  public readonly data: (BulletData & { type: 'bullet' | 'bomb' | 'cannonball' })[];
+  private readonly dummy = new Object3D();
+  private readonly capacity: number;
+
+  constructor(capacity = BULLET.ENEMY.POOL_CAPACITY) {
+    this.capacity = capacity;
+    // Base 1x1 geometry, scaled per-instance
+    const geom = new PlaneGeometry(1, 1);
+    const mat = new MeshBasicMaterial({ color: COLORS.BULLET_ENEMY });
+    this.mesh = new InstancedMesh(geom, mat, capacity);
+    this.mesh.count = 0;
+    this.mesh.frustumCulled = false;
+
+    this.data = new Array(capacity);
+    for (let i = 0; i < capacity; i++) {
+      this.data[i] = {
+        active: false,
+        x: 0,
+        y: 0,
+        vx: 0,
+        vy: 0,
+        penetrates: false,
+        dist: 0,
+        range: Infinity,
+        shotId: -1,
+        damage: 1,
+        type: 'bullet',
+      };
+    }
+  }
+
+  spawn(x: number, y: number, vx: number, vy = 0, type: 'bullet' | 'bomb' | 'cannonball' = 'bullet'): boolean {
+    for (const d of this.data) {
+      if (!d.active) {
+        d.active = true;
+        d.x = x;
+        d.y = y;
+        d.vx = vx;
+        d.vy = vy;
+        d.type = type;
+        d.dist = 0;
+        d.range = Infinity;
+        d.damage = type === 'bomb' ? ENEMY.BOMB.DAMAGE : (type === 'cannonball' ? ENEMY.CANNONBALL.DAMAGE : 1);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  update(dt: number, cameraRight: number): void {
+    for (const d of this.data) {
+      if (!d.active) continue;
+      d.x += d.vx * dt;
+      d.y += d.vy * dt;
+
+      if (d.x > cameraRight + 50 || d.x < -100 || d.y < -50 || d.y > 400) {
+        d.active = false;
+      }
+    }
+    this.syncInstances();
+  }
+
+  killAt(i: number): void {
+    const d = this.data[i];
+    if (d && d.active) d.active = false;
+  }
+
+  reset(): void {
+    for (const d of this.data) d.active = false;
+    this.mesh.count = 0;
+    this.mesh.instanceMatrix.needsUpdate = true;
+  }
+
+  private syncInstances(): void {
+    let idx = 0;
+    for (const d of this.data) {
+      if (!d.active) continue;
+      this.dummy.position.set(d.x, d.y, 0);
+      
+      let s: number = BULLET.ENEMY.WIDTH;
+      if (d.type === 'bomb') s = ENEMY.BOMB.SIZE;
+      else if (d.type === 'cannonball') s = ENEMY.CANNONBALL.SIZE;
+      
+      this.dummy.scale.set(s, s, 1);
       this.dummy.updateMatrix();
       this.mesh.setMatrixAt(idx, this.dummy.matrix);
       idx++;

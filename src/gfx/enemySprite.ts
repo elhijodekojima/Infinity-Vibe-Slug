@@ -98,6 +98,35 @@ const FRAME_TANK: string[] = [
   '................................', // 23
 ];
 
+const HELI_H = 24;
+const HELI_W = 48;
+const FRAME_HELI: string[] = [
+  '................................................', // 0
+  '.......KKKKKKKKKKKKKKKKKKKKKKKKKKKKKKK..........', // 1 ROTOR TOP
+  '...................KKK..........................', // 2
+  '..............KKKKKTTTKKKKK.....................', // 3 Top hub
+  '...........KKKTTTTTTTTTTTTTKKK..................', // 4
+  '..KKKKKKKKKTTTTTTTTTTTTTTTTTTTKKKKKKKKKKKKKKK...', // 5 BODY TOP
+  '.KTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTK..', // 6
+  'KTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTK.', // 7
+  'KTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTK.', // 8
+  'KTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTK.', // 9
+  'KTtttttttttttttttttttttttttttttttttttttttttttTK.', // 10 shadow
+  'KTtttttttttttttttttttttttttttttttttttttttttttTK.', // 11
+  'KKTtttttttttttttttttttttttttttttttttttttttttTKK.', // 12
+  '.KKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKK..', // 13
+  '.......KKK..........................KKK.........', // 14 Struts
+  '......KTTTK........................KTTTK........', // 15
+  '.....KTTTTTK......................KTTTTTK.......', // 16
+  '..KKKTTTTTTTKKKKKKKKKKKKKKKKKKKKKKTTTTTTTKKK....', // 17 SKIDS
+  '.KTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTK...', // 18
+  '..KKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKK....', // 19
+  '................................................', // 20
+  '................................................', // 21
+  '................................................', // 22
+  '................................................', // 23
+];
+
 export function getSoldierTexture(): CanvasTexture {
   return makePixelTexture([FRAME_SOLDIER], PALETTE);
 }
@@ -108,4 +137,8 @@ export function getShieldTexture(): CanvasTexture {
 
 export function getTankTexture(): CanvasTexture {
   return makePixelTexture([FRAME_TANK], PALETTE);
+}
+
+export function getHelicopterTexture(): CanvasTexture {
+  return makePixelTexture([FRAME_HELI], PALETTE);
 }

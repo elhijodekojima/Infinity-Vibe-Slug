@@ -33,10 +33,13 @@ export class RocketLauncher implements Weapon {
    * or rely on the caller to provide it. For now, let's keep it consistent
    * with the interface by ignoring the BulletPool arg and using the injected RocketPool.
    */
-  tryFire(_bullets: BulletPool, muzzleX: number, muzzleY: number, _shotId: number): boolean {
+  tryFire(_bullets: BulletPool, muzzleX: number, muzzleY: number, _shotId: number, aimAngle: number): boolean {
     if (this.cooldown > 0 || this._ammo <= 0) return false;
 
-    const ok = this.rockets.spawn(muzzleX, muzzleY, WEAPON.ROCKET.INITIAL_SPEED);
+    const vx = Math.cos(aimAngle) * WEAPON.ROCKET.INITIAL_SPEED;
+    const vy = Math.sin(aimAngle) * WEAPON.ROCKET.INITIAL_SPEED;
+
+    const ok = this.rockets.spawn(muzzleX, muzzleY, vx, vy);
     if (ok) {
       this._ammo--;
       this.cooldown = WEAPON.ROCKET.INTERVAL;

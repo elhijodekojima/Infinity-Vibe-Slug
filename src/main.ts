@@ -33,11 +33,13 @@ import { RocketLauncher } from './entities/weapons/rocketLauncher';
 import type { Weapon } from './entities/weapons/weapon';
 import { RocketPool } from './entities/rockets';
 import { ItemPool, type ItemType } from './entities/items/itemPool';
+import { HelicopterPool } from './entities/enemies/helicopterPool';
+import { EnemyBulletPool } from './entities/bullets';
 import { SpawnSystem } from './systems/spawnSystem';
 import { 
   getSoldierTexture, 
   getShieldTexture, 
-  getTankTexture 
+  getTankTexture,
 } from './gfx/enemySprite';
 import {
   getItemMGTexture,
@@ -48,7 +50,7 @@ import {
 import { aabbOverlap, type AABB } from './systems/collisions';
 import { initMenu, showMenu } from './ui/menu';
 import { initHUD, updateHUD, showHUD, hideHUD } from './ui/hud';
-import { initGameOver, showGameOver } from './ui/gameover';
+import { initGameOver, showGameOver, type GameOverStats } from './ui/gameover';
 import {
   PLAYER,
   SCROLL,
@@ -58,6 +60,7 @@ import {
   MELEE,
   WEAPON,
   DROP,
+  WORLD,
 } from './config/balance';
 import { COLORS } from './config/colors';
 
@@ -145,6 +148,12 @@ renderer.scene.add(explosions.mesh);
 const rockets = new RocketPool();
 renderer.scene.add(rockets.mesh);
 
+const helicopters = new HelicopterPool();
+renderer.scene.add(helicopters.mesh);
+
+const enemyBullets = new EnemyBulletPool();
+renderer.scene.add(enemyBullets.mesh);
+
 const items = new ItemPool(
   DROP.POOL_CAPACITY,
   getItemMGTexture(),
@@ -152,7 +161,7 @@ const items = new ItemPool(
   getItemRLTexture(),
   getItemGrenadeTexture()
 );
-items.meshes.forEach((m) => renderer.scene.add(m));
+items.meshes.forEach((m: import('three').InstancedMesh) => renderer.scene.add(m));
 
 const player = new Player();
 renderer.scene.add(player.mesh);
@@ -168,7 +177,7 @@ const arsenal: Record<string, Weapon> = {
   shotgun: weaponShotgun,
   rocket: weaponRocket,
 };
-const spawnSystem = new SpawnSystem(soldiers, shields, tanks);
+const spawnSystem = new SpawnSystem(soldiers, shields, tanks, helicopters);
 
 // Unified resize handler: renderer first, then anything that depends on
 // the updated camera frustum (currently just the background quad).
@@ -188,15 +197,17 @@ type Phase = 'menu' | 'running' | 'gameover';
 const state = {
   phase: 'menu' as Phase,
   score: 0,
+  kills: 0,
+  sessionTime: 0,
   grenades: PLAYER.START_GRENADES as number,
   username: 'AAA',
   currentWeapon: weaponPistol as Weapon,
-  /** Prevents firing guns for a short duration (e.g. after melee). */
   shootDelay: 0,
-  /** Unique ID for the current trigger pull. Incremented on successful fire. */
   globalShotId: 0,
   killsSinceLastDrop: 0,
   lastDropSpawnTime: 0,
+  /** Cooldown in seconds between grenade throws. */
+  grenadeCooldown: 0,
 };
 
 const AOE_R2 = GRENADE.EXPLOSION_RADIUS * GRENADE.EXPLOSION_RADIUS;
@@ -216,6 +227,8 @@ let meleeCooldown = 0;
 function refreshHUD(): void {
   updateHUD({
     score: state.score,
+    kills: state.kills,
+    sessionTime: state.sessionTime,
     weapon: state.currentWeapon.label,
     ammo: state.currentWeapon.ammo,
     grenades: state.grenades,
@@ -229,6 +242,8 @@ function resetAllPools(): void {
   bullets.reset();
   rockets.reset();
   items.reset();
+  helicopters.reset();
+  enemyBullets.reset();
   grenades.reset();
   explosions.reset();
 }
@@ -236,7 +251,10 @@ function resetAllPools(): void {
 function startGame(username: string): void {
   state.username = username;
   state.score = 0;
+  state.kills = 0;
+  state.sessionTime = 0;
   state.grenades = PLAYER.START_GRENADES;
+  state.grenadeCooldown = 0;
   state.phase = 'running';
 
   player.reset();
@@ -259,11 +277,12 @@ function startGame(username: string): void {
 /** 
  * Check for a drop on enemy death. 
  */
-function handleEnemyDeath(x: number, y: number): void {
+function handleEnemyDeath(x: number, y: number, isAir = false): void {
   state.killsSinceLastDrop++;
-  
-  const now = performance.now() / 1000; // in seconds
-  if (now - state.lastDropSpawnTime < 1.0) return; // Drop cooldown
+  state.kills++;
+
+  const now = performance.now() / 1000;
+  if (now - state.lastDropSpawnTime < 1.0) return;
 
   let shouldDrop = Math.random() < DROP.CHANCE;
   if (state.killsSinceLastDrop >= DROP.PITY_THRESHOLD) {
@@ -275,7 +294,8 @@ function handleEnemyDeath(x: number, y: number): void {
     state.killsSinceLastDrop = 0;
     const types: ItemType[] = ['machinegun', 'shotgun', 'rocket', 'grenade'];
     const type = types[Math.floor(Math.random() * types.length)]!;
-    items.spawn(x, y, type);
+    // isAir = true triggers parachute for helicopter drops
+    items.spawn(x, y, type, isAir);
   }
 }
 
@@ -284,7 +304,12 @@ function endGame(): void {
   state.phase = 'gameover';
   saveHighScore(state.score);
   hideHUD();
-  showGameOver(state.score);
+  const stats: GameOverStats = {
+    score: state.score,
+    kills: state.kills,
+    sessionTime: state.sessionTime,
+  };
+  showGameOver(stats);
 }
 
 function backToMenu(): void {
@@ -331,7 +356,10 @@ function resolveBulletEnemyHits(): void {
       const halfH = pool.config.height / 2;
       for (let si = 0; si < sData.length; si++) {
         const s = sData[si]!;
-        if (!s.active || !b.active) continue; // Double check b.active if a previous hit killed it
+        if (!s.active || !b.active) continue;
+
+        // Skip enemies that haven't entered the screen yet
+        if (s.x > renderer.camera.right || s.x < -pool.config.width) continue;
 
         // Anti-multihit: each shot (trigger pull) only damages an enemy once.
         if (s.lastShotIdHit === b.shotId) continue;
@@ -345,9 +373,10 @@ function resolveBulletEnemyHits(): void {
           // Record the hit to prevent double-dipping from this shot.
           s.lastShotIdHit = b.shotId;
 
-          // Shotgun (penetrates) damages everything it touches once per shot.
           // Normal bullets only damage if the enemy isn't blocking (shield).
-          const canDamage = b.penetrates || !pool.config.blocksFrontalBullets;
+          // Special rule: if the bullet is coming from above (vx < 0), it bypasses the shield.
+          const isFromAbove = b.vy < -100;
+          const canDamage = b.penetrates || !pool.config.blocksFrontalBullets || isFromAbove;
           
           if (canDamage) {
             if (pool.damageAt(si, b.damage)) {
@@ -362,6 +391,35 @@ function resolveBulletEnemyHits(): void {
             bullets.killAt(bi);
             continue bulletLoop;
           }
+        }
+      }
+    }
+  }
+
+  // --- Helicopter hits (with anti-multihit protection) ---
+  const hData = helicopters.data;
+  bulletLoop: for (let bi = 0; bi < bullets.data.length; bi++) {
+    const b = bullets.data[bi]!;
+    if (!b.active) continue;
+    bulletBox.x = b.x;
+    bulletBox.y = b.y;
+    for (let hi = 0; hi < hData.length; hi++) {
+      const h = hData[hi]!;
+      if (!h.active) continue;
+      // Skip off-screen helicopters
+      if (h.x > renderer.camera.right || h.x < -ENEMY.HELICOPTER.WIDTH) continue;
+      // Anti-multihit: shotgun pellets from the same trigger pull only damage once
+      if (h.lastShotIdHit === b.shotId) continue;
+      const hBox = { x: h.x, y: h.y, w: ENEMY.HELICOPTER.WIDTH, h: ENEMY.HELICOPTER.HEIGHT };
+      if (aabbOverlap(bulletBox, hBox)) {
+        h.lastShotIdHit = b.shotId;
+        if (helicopters.damageAt(hi, b.damage)) {
+          state.score += ENEMY.HELICOPTER.SCORE;
+          handleEnemyDeath(h.x, h.y, true);
+        }
+        if (!b.penetrates) {
+          bullets.killAt(bi);
+          continue bulletLoop;
         }
       }
     }
@@ -384,6 +442,8 @@ function resolveRocketEnemyHits(): void {
       for (let si = 0; si < sData.length; si++) {
         const s = sData[si]!;
         if (!s.active) continue;
+        // Skip enemies off-screen (can't melee or be meleed off-screen)
+        if (s.x > renderer.camera.right || s.x < -pool.config.width) continue;
         enemyBox.x = s.x;
         enemyBox.y = s.y + halfH;
         if (aabbOverlap(bulletBox, enemyBox)) {
@@ -391,8 +451,30 @@ function resolveRocketEnemyHits(): void {
           rockets.killAt(ri);
           explosions.spawn(r.x, r.y, GRENADE.EXPLOSION_RADIUS);
           applyExplosionDamage(r.x, r.y);
-          continue rocketLoop; // Process next rocket instead of returning
+        continue rocketLoop; // Process next rocket instead of returning
         }
+      }
+    }
+  }
+
+  // --- Rocket vs Helicopter ---
+  rocketLoop: for (let ri = 0; ri < rData.length; ri++) {
+    const r = rData[ri]!;
+    if (!r.active) continue;
+    bulletBox.x = r.x;
+    bulletBox.y = r.y;
+    for (let hi = 0; hi < helicopters.data.length; hi++) {
+      const h = helicopters.data[hi]!;
+      if (!h.active) continue;
+      // Skip off-screen helicopters
+      if (h.x > renderer.camera.right || h.x < -ENEMY.HELICOPTER.WIDTH) continue;
+      const hBox = { x: h.x, y: h.y, w: ENEMY.HELICOPTER.WIDTH, h: ENEMY.HELICOPTER.HEIGHT };
+      if (aabbOverlap(bulletBox, hBox)) {
+        rockets.killAt(ri);
+        explosions.spawn(r.x, r.y, GRENADE.EXPLOSION_RADIUS);
+        // applyExplosionDamage handles helicopter damage (same path as tanks)
+        applyExplosionDamage(r.x, r.y);
+        continue rocketLoop;
       }
     }
   }
@@ -400,6 +482,14 @@ function resolveRocketEnemyHits(): void {
 
 function resolvePlayerEnemyHits(): boolean {
   const pBox = player.aabb;
+  
+  // Helicopter contact = instant death
+  for (const h of helicopters.data) {
+    if (!h.active) continue;
+    const hBox = { x: h.x, y: h.y, w: ENEMY.HELICOPTER.WIDTH, h: ENEMY.HELICOPTER.HEIGHT };
+    if (aabbOverlap(pBox, hBox)) return true;
+  }
+
   for (const pool of enemyPools) {
     enemyBox.w = pool.config.width;
     enemyBox.h = pool.config.height;
@@ -411,7 +501,20 @@ function resolvePlayerEnemyHits(): boolean {
       enemyBox.x = s.x;
       enemyBox.y = s.y + halfH;
       if (aabbOverlap(pBox, enemyBox)) {
-        return true;
+        if (pool.config.label === 'tank') return true; // Tank is instant death
+
+        // Melee only triggers when the enemy is AHEAD (right side) of the player.
+        // If the player has passed through to the enemy's back, no death.
+        const isFrontal = s.x > player.x;
+        if (!isFrontal) continue;
+        
+        // Soldier/Shield: starts melee timer if not already attacking
+        if (s.meleeTimer <= 0) {
+          s.meleeTimer = 0.5; // Start "attack animation"
+        } else if (s.meleeTimer < 0.05) {
+          // Timer finished while still in frontal contact
+          return true;
+        }
       }
     }
   }
@@ -426,6 +529,8 @@ function applyExplosionDamage(cx: number, cy: number): void {
     for (let si = 0; si < sData.length; si++) {
       const s = sData[si]!;
       if (!s.active) continue;
+      // Skip off-screen enemies
+      if (s.x > renderer.camera.right || s.x < -pool.config.width) continue;
       const dx = s.x - cx;
       const dy = (s.y + halfH) - cy;
       if (dx * dx + dy * dy <= AOE_R2) {
@@ -435,6 +540,60 @@ function applyExplosionDamage(cx: number, cy: number): void {
         }
       }
     }
+  }
+  // Helicopters take explosion damage too
+  for (let hi = 0; hi < helicopters.data.length; hi++) {
+    const h = helicopters.data[hi]!;
+    if (!h.active) continue;
+    // Skip off-screen helicopters
+    if (h.x > renderer.camera.right || h.x < -ENEMY.HELICOPTER.WIDTH) continue;
+    const dx = h.x - cx;
+    const dy = h.y - cy;
+    if (dx * dx + dy * dy <= AOE_R2) {
+      if (helicopters.damageAt(hi, ENEMY.EXPLOSION_DAMAGE)) {
+        state.score += ENEMY.HELICOPTER.SCORE;
+        handleEnemyDeath(h.x, h.y, true);
+      }
+    }
+  }
+}
+
+/** Player vs Enemy Projectiles */
+function resolveEnemyBulletPlayerHits(): void {
+  const pBox = player.aabb;
+  for (let i = 0; i < enemyBullets.data.length; i++) {
+    const b = enemyBullets.data[i]!;
+    if (!b.active) continue;
+    
+    // Scale bullet hitbox based on type
+    let s: number = BULLET.ENEMY.WIDTH;
+    if (b.type === 'bomb') s = ENEMY.BOMB.SIZE;
+    else if (b.type === 'cannonball') s = ENEMY.CANNONBALL.SIZE;
+    
+    const bBox = { x: b.x, y: b.y, w: s, h: s };
+    if (aabbOverlap(pBox, bBox)) {
+      if (b.type === 'bomb') {
+        // Bomb triggers explosion on player contact
+        enemyBullets.killAt(i);
+        explosions.spawn(b.x, b.y, GRENADE.EXPLOSION_RADIUS);
+        resolveExplosionPlayerHits(b.x, b.y);
+      } else {
+        endGame();
+      }
+    }
+  }
+}
+
+/** Check if player is caught in a mushroom/bomb explosion */
+function resolveExplosionPlayerHits(cx: number, cy: number): void {
+  const pBox = player.aabb;
+  const dx = Math.abs(player.x - cx);
+  // Mushroom explosion damage: Narrow (player width) but tall.
+  const isMatchX = dx < PLAYER.WIDTH;
+  const isMatchY = player.y > (cy - GRENADE.EXPLOSION_RADIUS) && player.y < (cy + 100);
+  
+  if (isMatchX && isMatchY) {
+    endGame();
   }
 }
 
@@ -502,13 +661,20 @@ function tryMelee(): boolean {
  */
 function tryThrowGrenade(): void {
   if (state.grenades <= 0) return;
+  
+  const isTargetingGround = player.aimAngle < -1.0;
+  
   const ok = grenades.spawn(
     player.muzzleX,
     player.muzzleY,
-    GRENADE.THROW_VX,
-    GRENADE.THROW_VY,
+    isTargetingGround ? 0 : GRENADE.THROW_VX,
+    isTargetingGround ? -400 : GRENADE.THROW_VY,
+    isTargetingGround // isStraight = true when targeting ground in air
   );
-  if (ok) state.grenades--;
+  if (ok) {
+    state.grenades--;
+    state.grenadeCooldown = 1.5;
+  }
 }
 
 function resolvePlayerItemPickups(): void {
@@ -569,6 +735,8 @@ const loop = new Loop(
   (dt) => {
     if (state.phase !== 'running') return;
 
+    state.sessionTime += dt;
+
     background.update(dt, SCROLL.BASE_SPEED);
     player.update(dt, input, renderer.camera.right);
 
@@ -587,7 +755,7 @@ const loop = new Loop(
       const didMelee = firePressed ? tryMelee() : false;
       
       if (!didMelee) {
-        if (state.currentWeapon.tryFire(bullets, player.muzzleX, player.muzzleY, state.globalShotId)) {
+        if (state.currentWeapon.tryFire(bullets, player.muzzleX, player.muzzleY, state.globalShotId, player.aimAngle)) {
           state.globalShotId++;
         }
       }
@@ -598,14 +766,52 @@ const loop = new Loop(
       state.currentWeapon = weaponPistol;
     }
 
-    if (input.wasPressed('grenade')) tryThrowGrenade();
+    state.grenadeCooldown = Math.max(0, state.grenadeCooldown - dt);
+    if (input.wasPressed('grenade') && state.grenadeCooldown <= 0) tryThrowGrenade();
 
     bullets.update(dt, renderer.camera.right);
+    // Extra pass for bullet ground collision check
+    for (const b of bullets.data) {
+      if (b.active && b.y <= WORLD.GROUND_Y) {
+        b.active = false;
+      }
+    }
+
+    // --- Enemy Entities Update ---
+    // Infantry bullets fly at player chest height so crouching dodges them.
+    const infantryBulletY = WORLD.GROUND_Y + PLAYER.HEIGHT * 0.65;
+    const screenRight = renderer.camera.right;
+    soldiers.update(dt, (x, _y) => {
+      if (x > screenRight || x < 0) return; // off-screen, no shooting
+      enemyBullets.spawn(x, infantryBulletY, -BULLET.ENEMY.SPEED, 0, 'bullet');
+    });
+    shields.update(dt, (x, _y) => {
+      if (x > screenRight || x < 0) return;
+      enemyBullets.spawn(x, infantryBulletY, -BULLET.ENEMY.SPEED, 0, 'bullet');
+    });
+    tanks.update(dt, (x, _y) => {
+      if (x > screenRight || x < 0) return;
+      enemyBullets.spawn(x, WORLD.GROUND_Y + ENEMY.CANNONBALL.SIZE / 2, -ENEMY.CANNONBALL.SPEED, 0, 'cannonball');
+    });
+    
+    helicopters.update(dt, player.x, renderer.camera.right, (x, y) => {
+      // Drop bomb from heli
+      enemyBullets.spawn(x, y, 0, -ENEMY.BOMB.SPEED, 'bomb');
+    });
+
+    enemyBullets.update(dt, renderer.camera.right);
+    // Enemy bullets that hit ground (except cannonball which rolls)
+    for (const b of enemyBullets.data) {
+      if (b.active && b.type === 'bomb' && b.y <= WORLD.GROUND_Y) {
+        b.active = false;
+        explosions.spawn(b.x, WORLD.GROUND_Y, GRENADE.EXPLOSION_RADIUS);
+        applyExplosionDamage(b.x, WORLD.GROUND_Y);
+        resolveExplosionPlayerHits(b.x, WORLD.GROUND_Y);
+      }
+    }
+
     rockets.update(dt, renderer.camera.right);
     items.update(dt, SCROLL.BASE_SPEED);
-    soldiers.update(dt);
-    shields.update(dt);
-    tanks.update(dt);
     spawnSystem.update(dt, renderer.camera.right);
 
     // Grenade physics + detonation in a single pass. Callback fires once
@@ -619,6 +825,7 @@ const loop = new Loop(
 
     resolveBulletEnemyHits();
     resolveRocketEnemyHits();
+    resolveEnemyBulletPlayerHits();
     resolvePlayerItemPickups();
     refreshHUD();
 

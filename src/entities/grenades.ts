@@ -23,6 +23,8 @@ export interface GrenadeData {
   vx: number;
   /** Vertical velocity (u/s), starts positive (upward) and decays. */
   vy: number;
+  /** If true, gravity is ignored (used for vertical drops in air). */
+  isStraight: boolean;
 }
 
 /**
@@ -50,12 +52,12 @@ export class GrenadePool {
 
     this.data = new Array(capacity);
     for (let i = 0; i < capacity; i++) {
-      this.data[i] = { active: false, x: 0, y: 0, vx: 0, vy: 0 };
+      this.data[i] = { active: false, x: 0, y: 0, vx: 0, vy: 0, isStraight: false };
     }
   }
 
   /** Throw a new grenade. Returns false if the pool is saturated. */
-  spawn(x: number, y: number, vx: number, vy: number): boolean {
+  spawn(x: number, y: number, vx: number, vy: number, isStraight = false): boolean {
     for (let i = 0; i < this.capacity; i++) {
       const d = this.data[i]!;
       if (!d.active) {
@@ -64,6 +66,7 @@ export class GrenadePool {
         d.y = y;
         d.vx = vx;
         d.vy = vy;
+        d.isStraight = isStraight;
         return true;
       }
     }
@@ -83,7 +86,9 @@ export class GrenadePool {
       // World scroll: projectiles in flight should follow the world
       d.x -= scrollSpeed * dt;
 
-      d.vy += GRENADE.GRAVITY * dt;
+      if (!d.isStraight) {
+        d.vy += GRENADE.GRAVITY * dt;
+      }
       d.x += d.vx * dt;
       d.y += d.vy * dt;
 
