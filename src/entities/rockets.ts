@@ -55,7 +55,7 @@ export class RocketPool {
     return false;
   }
 
-  update(dt: number, cameraRight: number): void {
+  update(dt: number, cameraRight: number, terrain?: any, onExplode?: (x: number, y: number) => void): void {
     const acc = WEAPON.ROCKET.ACCELERATION;
     for (let i = 0; i < this.capacity; i++) {
       const d = this.data[i]!;
@@ -75,6 +75,18 @@ export class RocketPool {
 
       if (d.x > cameraRight + 32 || d.x < -32 || d.y < -100 || d.y > 600) {
         d.active = false;
+        continue;
+      }
+
+      // Terrain Collision
+      if (terrain && onExplode) {
+        const groundY = terrain.getSurfaceHeight(d.x, d.y, d.vy);
+        if (d.y <= groundY) {
+          d.y = groundY;
+          d.active = false;
+          onExplode(d.x, d.y);
+          continue;
+        }
       }
     }
     this.syncInstances();

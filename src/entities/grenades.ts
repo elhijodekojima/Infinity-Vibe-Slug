@@ -78,7 +78,7 @@ export class GrenadePool {
    * the ground this frame. The grenade is already marked inactive by the
    * time the callback fires, and `d.y` has been clamped to `GROUND_Y`.
    */
-  update(dt: number, scrollSpeed: number, onExplode: (x: number, y: number) => void): void {
+  update(dt: number, scrollSpeed: number, terrain?: any, onExplode?: (x: number, y: number) => void): void {
     for (let i = 0; i < this.capacity; i++) {
       const d = this.data[i]!;
       if (!d.active) continue;
@@ -92,10 +92,18 @@ export class GrenadePool {
       d.x += d.vx * dt;
       d.y += d.vy * dt;
 
-      if (d.y <= WORLD.GROUND_Y) {
+      if (terrain && onExplode) {
+        const groundY = terrain.getSurfaceHeight(d.x, d.y, d.vy);
+        if (d.y <= groundY) {
+          d.y = groundY;
+          d.active = false;
+          onExplode(d.x, d.y);
+        }
+      } else if (d.y <= WORLD.GROUND_Y) {
+        // Fallback for when terrain manager isn't passed
         d.y = WORLD.GROUND_Y;
         d.active = false;
-        onExplode(d.x, d.y);
+        if (onExplode) onExplode(d.x, d.y);
       }
     }
     this.syncInstances();

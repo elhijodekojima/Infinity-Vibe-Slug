@@ -85,7 +85,7 @@ export class Player {
     return this._y + baseH;
   }
 
-  update(dt: number, input: Input, maxX: number): void {
+  update(dt: number, input: Input, maxX: number, terrain: any): void {
     const down = input.isDown('down');
     const up = input.isDown('up');
 
@@ -148,12 +148,18 @@ export class Player {
     this.vy += PLAYER.GRAVITY * dt;
     this._y += this.vy * dt;
 
-    if (this._y <= WORLD.GROUND_Y) {
-      this._y = WORLD.GROUND_Y;
+    // --- Terrain Collision ---
+    const surfaceY = terrain.getSurfaceHeight(this._x, this._y, this.vy);
+    
+    // Land if we hit the surface while falling (vy <= 0).
+    // Small buffer for slopes: if we are within range of surface, stick to it.
+    if (this._y <= surfaceY && (this.vy <= 0 || (this.grounded && this._y > surfaceY - 5))) {
+      this._y = surfaceY;
       this.vy = 0;
       this.grounded = true;
+    } else {
+      this.grounded = false;
     }
-
 
     this.syncMesh();
   }

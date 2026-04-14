@@ -20,4 +20,6 @@ export const COLORS = {
   ROCKET: 0xffa040,
   ACCENT: 0xffd86a,
   DANGER: 0xd04040,
+  PLATFORM: 0x5d4037,
+  TERRAIN: 0x3e2723,
 } as const;

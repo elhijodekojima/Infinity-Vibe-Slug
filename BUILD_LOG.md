@@ -440,3 +440,38 @@
 
 #### ➡️ Siguiente paso
 - Implementación de enemigos voladores y efectos de sonido (Web Audio API).
+
+---
+
+### [2026-04-14] — Procedural Obstacle System & Terrain-Aware AI
+
+**Estado general:** 🟢 verde
+**Bundle size actual:** ≈ 58 KB (gzip)
+**Tiempo a primer paint:** < 100 ms
+
+#### ✅ Hecho
+
+- **Terrain Management (src/systems/terrain/terrainManager.ts):**
+  - Implementado generador de "chunks" con 5 patrones: Single Platform, Stair Sequence, Platform Swarm, Hill y Valley.
+  - Sistema de superficie dinámico que soporta colinas con pendientes suaves (`lerp`) y plataformas atravesables desde abajo (one-way).
+- **Instanced Rendering (src/entities/terrainPools.ts):**
+  - Uso de `InstancedMesh` para optimizar el dibujo de cientos de segmentos de terreno y plataformas.
+  - Técnica de "vertical slices" (listones de 4px) para renderizar pendientes suaves de forma procedural sin texturas externas.
+- **Physics & AI Refactor:**
+  - **Player & Items**: Refactorizada la gravedad para consultar `getSurfaceHeight` en lugar de una constante de suelo.
+  - **Soldier AI**: Implementada lógica de salto y caída con retardo (0.3s-0.7s) para que persigan al jugador verticalmente.
+  - **Shield/Tank AI**: Añadida detección de bordes para que se detengan en precipicios/bordes de plataforma.
+  - **Heli Bombs**: Lógica de colisión selectiva: atraviesan plataformas a menos que el jugador esté a la misma altura o impacten con terreno sólido.
+- **Spawn System Integration:**
+  - El sistema de spawn ahora identifica automáticamente superficies elevadas para instanciar enemigos fuera de pantalla.
+  - Ajuste dinámico de pesos: menos tanques en zonas de plataformas/parkour; más helicópteros para presionar verticalmente.
+
+#### 🧠 Decisiones
+- **AD-035 — Sliced Terrain Rendering**: Se optó por dibujar el terreno sólido mediante "slices" verticales de 4px de ancho. Esto permite representar cualquier pendiente `lerp-ed` manteniendo el "zero-loading" y con un coste de draw-call mínimo (1 call por todo el suelo).
+
+#### 🐞 Problemas / Bloqueos
+- **Duplicate Syntax**: Corregido un error de sintaxis duplicada tras el refactor de `EnemyPool`.
+- **Item Collision**: Corregida la colisión de cajas de armas para que no se "entierren" en las pendientes de las colinas.
+
+#### ➡️ Siguiente paso
+- Implementación final de la mecánica de "Heli-2" (vuelo inteligente) y SFX.

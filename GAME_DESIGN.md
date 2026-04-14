@@ -39,6 +39,7 @@
 | **Movimiento** | `A`/`D` para horizontal. `S` para **agacharse** en suelo (hitbox reducida, velocidad 50%). |
 | **Apuntado** | `W` para apuntar arriba (transición gradual). `S` en aire para apuntar abajo (instantáneo). |
 | **Granada** | `K` para lanzar. Parabólica por defecto, recta hacia abajo si se apunta al suelo en salto. |
+| **Pausa** | `ESC` congela completamente el juego para permitir descansos durante partidas largas. |
 
 ---
 
@@ -55,15 +56,16 @@
 #### 1. Soldado raso — **85–90%** del spawn
 - Muere de **un toque**.
 - Dispara ocasionalmente.
-- Puede saltar a plataformas.
+- **Salto Tactico**: Puede saltar a plataformas para perseguir al jugador tras un breve retardo (0.3s-0.7s).
+- **Caída Inteligente**: Se deja caer de plataformas si el jugador está debajo.
 - Ataque cuerpo a cuerpo en colisión tras breve retardo (margen de escape estrecho).
 - **Puntos base:** `X`
 
 #### 2. Soldado con escudo
 - Igual que el raso **excepto**:
   - **Inmune a balas frontales** (vulnerable si le disparas desde arriba tras saltarlo).
-  - **No** inmune a explosiones y melee.
-  - No salta a plataformas.
+  - **No salta a plataformas**: Se queda en el nivel donde spawneó.
+  - **Edge Stopping**: Se detiene al llegar al borde de una plataforma o precipicio.
   - Dispara menos.
   - Más lento.
 - Sirve para **proteger** a otros enemigos tras él (cuello de botella satisfactorio al eliminarlo).
@@ -73,10 +75,17 @@
 - Tamaño grande, pero saltable por el jugador.
 - **Mata en colisión instantánea.**
 - Lenta.
-- Dispara una **bola que rueda por el suelo** (se "desparrama" del cañón).
-- Aguanta **10–12 balas** o **3–4 explosiones**.
-- Menos frecuente.
+- **No salta**: Su peso le impide subir a plataformas.
+- **Edge Stopping**: Se detiene al llegar a un borde para evitar caer (compensando el auto-scroll de la pantalla).
+- Aguanta **12 balas** o **3 explosiones**.
+- Sus proyectiles rastrean y siguen las pendientes del terreno.
 - **Puntos base:** `5X`
+
+#### 4. Helicóptero
+- Unidad aérea pesada.
+- Lanza bombas verticales hacia abajo.
+- **Paridad Vertical**: Sus bombas ignoran las plataformas horizontales hasta chocar con el mismo plano de altura exacto en el que se encuentra el jugador, evitando que el terreno actúe como escudo gratuito.
+- **Puntos base:** `3X`
 
 ### Balas enemigas
 - **Parpadean** en dos colores.
@@ -140,12 +149,21 @@ El Director de Dificultad ajusta los pesos de aparición según el estado del ju
 - **No muchos** — no es un platformer.
 - **No muy frecuentes** — el jugador no debería tocar tierra *nunca* del todo, pero tampoco vivir en plataformas.
 
-### Patrones
+### Patrones (Chunks Procedurales)
 
-1. **Plataforma simple**: altura saltable. A veces encadenada con otra más alta (solo accesible desde la primera).
-   - **Regla:** si hay una plataforma alta, debe haber **otra baja a continuación** para que los soldados rasos también puedan subir (cuello de botella para el jugador).
-2. **Rampa doble con descansillo**: forma cuellos de botella (se acumulan enemigos detrás).
-3. **Valle** (rampa baja y luego sube): inverso del anterior.
+El sistema genera obstáculos en "chunks" ponderados que se desplazan con el scroll:
+
+1. **Plataforma Simple**: Una superficie horizontal única a altura saltable.
+2. **Escalera (Stairs)**: Secuencia de 3 plataformas escalonadas que permiten subir y bajar con fluidez.
+3. **Enjambre (Swarm)**: 8-10 pequeñas plataformas aleatorias que requieren saltos encadenados (parkour).
+4. **Colina (Hill)**: Elevación del terreno sólido con pendientes suaves (walkable).
+5. **Valle (Valley)**: Depresión del terreno sólido; crea una zona de riesgo bajo.
+
+### Reglas de Diseño
+- **One-Way Platforms**: Las plataformas se pueden atravesar saltando desde abajo.
+- **Smooth Slopes**: El terreno sólido nunca tiene bordes afilados que bloqueen el movimiento.
+- **Spawn Awareness**: Los enemigos pueden spawnear sobre plataformas y colinas fuera de pantalla detectando las "Spawn Zones".
+- **Combat Context Layer (Terrain Intent)**: Todo obstáculo emite una "Intención" táctica (`flat`, `vertical`, `choke_low`, `high_ground`, `chaotic`). Esto es recogido por el Director de Juego cada 0.25s para mutar la partida (ej. si hay un embudo, multiplica spawns de tanquetas e inyecta Rocket Launchers en los drops).
 
 ---
 

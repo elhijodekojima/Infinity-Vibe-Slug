@@ -1,8 +1,10 @@
-import { DIRECTOR, SpawnPhase, SPAWN, DROP } from '../config/balance';
+import { DIRECTOR, SpawnPhase, SPAWN, DROP, TerrainIntent, CombatContext, COMBAT_CONTEXT } from '../config/balance';
+import type { TerrainManager } from './terrain/terrainManager';
 
 export interface PlayerStats {
   ammoNormalized: number; // 0 (empty) to 1 (full)
   isPistol: boolean;
+  hasSpecialWeapon: boolean;
   recentDanger: number;   // normalized 0-1 (near misses, low health if it existed)
 }
 
@@ -17,7 +19,15 @@ export class DifficultyDirector {
   private spawnRateMultiplier = 1.0;
   private dropChanceMultiplier = 1.0;
 
-  constructor() {
+  public context: CombatContext = {
+    phase: 'mixed',
+    terrainIntent: 'flat',
+    pressure: 0,
+    enemyDensity: 0,
+    playerState: { hasSpecialWeapon: false, ammoRatio: 0 }
+  };
+
+  constructor(private readonly terrain: TerrainManager) {
     this.rollPhase();
   }
 
@@ -31,9 +41,31 @@ export class DifficultyDirector {
     }
 
     if (this.updateTimer <= 0) {
-      this.updateTimer = DIRECTOR.UPDATE_INTERVAL;
+      this.updateTimer = COMBAT_CONTEXT.UPDATE_INTERVAL;
       this.calculatePressure(stats, enemiesNearbyCount);
       this.applyCoupling();
+
+      // Update CombatContext layer
+      this.context.phase = this.currentPhase;
+      this.context.terrainIntent = this.terrain.getCurrentTerrainIntent();
+      this.context.pressure = this.pressure;
+      this.context.enemyDensity = enemiesNearbyCount;
+      this.context.playerState.hasSpecialWeapon = stats.hasSpecialWeapon;
+      this.context.playerState.ammoRatio = stats.ammoNormalized;
+
+      this.evaluateTerrainOverrides();
+    }
+  }
+
+  private evaluateTerrainOverrides(): void {
+    const intent = this.context.terrainIntent;
+    
+    // Contextual Phase overrides
+    if (intent === 'choke_low' && this.currentPhase !== 'pressure') {
+      this.currentPhase = 'pressure';
+    } 
+    if (intent === 'chaotic' && Math.random() < 0.3 && this.currentPhase !== 'swarm') {
+      this.currentPhase = 'swarm';
     }
   }
 

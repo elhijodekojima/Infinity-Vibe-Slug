@@ -71,10 +71,17 @@
 **Decisión:** Reemplazar escalado lineal de enemigos por un Director de Dificultad reactivo basado en el "Pressure Score" (densidad de enemigos, munición, peligro reciente).
 **Razón:** Evita el aburrimiento en rachas de dominio y el agobio injusto, creando loops de tensión y alivio arcade.
 
-### AD-034 — Context-Aware Drop System
-**Fecha:** 2026-04-14
-**Decisión:** Selección de items ponderada por el estado del jugador (baja munición → más armas; mucha densidad → escopeta; tanques → cohetes).
 **Razón:** Ayuda al jugador cuando lo necesita y potencia la "fantasía de poder" en momentos críticos de forma orgánica.
+
+### AD-035 — Procedural Obstacle System (Terrain)
+**Fecha:** 2026-04-14
+**Decisión:** Implementar un sistema de "chunks" para obstáculos (plataformas, escaleras, colinas, valles) usando `InstancedMesh`. Las colinas/valles se dibujan con "slices" verticales para permitir pendientes suaves sin assets externos.
+**Razón:** Rompe la linealidad horizontal del nivel y añade verticalidad táctica sin violar la regla "Zero-Loading".
+
+### AD-036 — Combat Context Layer
+**Fecha:** 2026-04-14
+**Decisión:** Unificar los sistemas de AI, Terrain y Drops mediante un "Contexto de Combate" que categoriza geográficamente el terreno activo (`choke_low`, `chaotic`, `high_ground`) y afecta la probabilidad base de spawns e items dinámicamente cada 0.25s.
+**Razón:** Evita la desconexión mecánica y asegura una reactividad sistémica ("Emergent Gameplay") estilo Left 4 Dead AI Director.
 
 ---
 
@@ -199,7 +206,9 @@ infinity-vibe-slug/
 - ✅ PASO 5: Arsenal completo y sistema de Drops.
 - ✅ PASO 6: Acrobacias (Crouch, Aim Up/Down) y remapa de controles.
 - ✅ PASO 7: Difficulty Director, Dynamic Drops y Gameplay Polish.
-- ⏸️ **Pendiente:** Implementación de enemigos voladores y efectos de sonido.
+- ✅ PASO 8: Sistema de Obstáculos Procedurales y Terreno Dinámico.
+- ✅ PASO 9: Combat Context Layer, Helicópteros (Enemigos Aéreos) y Sistema de Pausa.
+- ⏸️ **Pendiente:** Mejoras de Animación/Arte final y Efectos de sonido (Web Audio API).
 
 ---
 

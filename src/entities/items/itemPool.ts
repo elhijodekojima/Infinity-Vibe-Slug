@@ -94,7 +94,7 @@ export class ItemPool {
     return false;
   }
 
-  update(dt: number, scrollSpeed: number): void {
+  update(dt: number, scrollSpeed: number, terrain?: any): void {
     for (let i = 0; i < this.capacity; i++) {
       const d = this.data[i]!;
       if (!d.active) continue;
@@ -110,8 +110,9 @@ export class ItemPool {
 
       d.y += d.vy * dt;
 
-      if (d.y < WORLD.GROUND_Y) {
-        d.y = WORLD.GROUND_Y;
+      const surfaceY = terrain ? terrain.getSurfaceHeight(d.x, d.y, d.vy) : WORLD.GROUND_Y;
+      if (d.y < surfaceY) {
+        d.y = surfaceY;
         d.vy = 0;
       }
       

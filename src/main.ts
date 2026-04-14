@@ -37,6 +37,8 @@ import { HelicopterPool } from './entities/enemies/helicopterPool';
 import { EnemyBulletPool } from './entities/bullets';
 import { SpawnSystem } from './systems/spawnSystem';
 import { DifficultyDirector } from './systems/difficultyDirector';
+import { TerrainManager } from './systems/terrain/terrainManager';
+import { TerrainPools } from './entities/terrainPools';
 import { 
   getSoldierTexture, 
   getShieldTexture, 
@@ -63,6 +65,7 @@ import {
   DROP,
   WORLD,
   DIRECTOR,
+  DROP_CONTEXT_MOD,
 } from './config/balance';
 import { COLORS } from './config/colors';
 
@@ -166,6 +169,11 @@ const items = new ItemPool(
 );
 items.meshes.forEach((m: import('three').InstancedMesh) => renderer.scene.add(m));
 
+const terrainManager = new TerrainManager();
+const terrainPools = new TerrainPools();
+renderer.scene.add(terrainPools.platformMesh);
+renderer.scene.add(terrainPools.groundMesh);
+
 const player = new Player();
 renderer.scene.add(player.mesh);
 
@@ -180,7 +188,7 @@ const arsenal: Record<string, Weapon> = {
   shotgun: weaponShotgun,
   rocket: weaponRocket,
 };
-const director = new DifficultyDirector();
+const director = new DifficultyDirector(terrainManager);
 const spawnSystem = new SpawnSystem(director, soldiers, shields, tanks, helicopters);
 
 // Unified resize handler: renderer first, then anything that depends on
@@ -202,6 +210,7 @@ const state = {
   phase: 'menu' as Phase,
   score: 0,
   kills: 0,
+  lives: 3,
   sessionTime: 0,
   countdown: 4,
   grenades: PLAYER.START_GRENADES as number,
@@ -212,6 +221,7 @@ const state = {
   lastDropSpawnTime: 0,
   /** Cooldown in seconds between grenade throws. */
   grenadeCooldown: 0,
+  isPaused: false,
 };
 
 const AOE_R2 = GRENADE.EXPLOSION_RADIUS * GRENADE.EXPLOSION_RADIUS;
@@ -252,33 +262,34 @@ function resetAllPools(): void {
   explosions.reset();
 }
 
-function startGame(username: string): void {
-  state.username = username;
+function resetGame(): void {
   state.score = 0;
   state.kills = 0;
+  state.lives = 3;
   state.sessionTime = 0;
-  state.grenades = PLAYER.START_GRENADES;
   state.grenadeCooldown = 0;
   state.countdown = 4;
-  state.phase = 'counting';
-
-  player.reset();
-  
-  // Reset all weapons and start with pistol.
-  for (const w of Object.values(arsenal)) w.reset();
-  state.currentWeapon = weaponPistol;
   state.shootDelay = 0;
   state.globalShotId = 0;
+  state.grenades = PLAYER.START_GRENADES;
+
+  player.reset();
+  for (const w of Object.values(arsenal)) w.reset();
+  state.currentWeapon = weaponPistol;
 
   meleeCooldown = 0;
   resetAllPools();
   spawnSystem.reset();
-  
-  // NEW: Also reset difficulty director
-  // (We'll just create a new one to be safe)
-  // director.reset(); // If we had a reset
-  
+  terrainManager.reset();
+  terrainPools.reset();
+
   refreshHUD();
+}
+
+function startGame(username: string): void {
+  state.username = username;
+  resetGame();
+  state.phase = 'counting';
   showHUD();
 }
 
@@ -329,6 +340,18 @@ function handleEnemyDeath(x: number, y: number, isAir = false): void {
     // Tank presence → Rocket boost
     if (tanks.data.some(t => t.active)) weights.rocket += 1.5;
 
+    // --- Dynamic CombatContext Scaling for Drops ---
+    const context = director.context;
+    const terrainMod = DROP_CONTEXT_MOD[context.terrainIntent] || {};
+    
+    // Apply terrain modifiers directly to weights
+    if (terrainMod.machinegun) weights.machinegun *= terrainMod.machinegun;
+    if (terrainMod.shotgun) weights.shotgun *= terrainMod.shotgun;
+    if (terrainMod.rocket) weights.rocket *= terrainMod.rocket;
+    if (terrainMod.grenade) weights.grenade *= terrainMod.grenade;
+    
+    // Optionally multiply all by pressure if needed, but Context Mod is enough.
+
     // Pick weighted result
     const itemsList = Object.keys(weights) as ItemType[];
     const totalWeight = Object.values(weights).reduce((a, b) => a + b, 0);
@@ -362,8 +385,9 @@ function endGame(): void {
 
 function backToMenu(): void {
   state.phase = 'menu';
-  hideHUD();
   showMenu(loadHighScore());
+  hideHUD();
+  resetGame();
 }
 
 // ---------------------------------------------------------------------------
@@ -422,9 +446,10 @@ function resolveBulletEnemyHits(): void {
           s.lastShotIdHit = b.shotId;
 
           // Normal bullets only damage if the enemy isn't blocking (shield).
-          // Special rule: if the bullet is coming from above (vx < 0), it bypasses the shield.
-          const isFromAbove = b.vy < -100;
-          const canDamage = b.penetrates || !pool.config.blocksFrontalBullets || isFromAbove;
+          // Special rule: Shield is vulnerable ONLY at the very top or very bottom lines.
+          const isFromAbove = b.y > s.y + pool.config.height - 4;
+          const isFromBelow = b.y < s.y + 4;
+          const canDamage = b.penetrates || !pool.config.blocksFrontalBullets || isFromAbove || isFromBelow;
           
           if (canDamage) {
             if (pool.damageAt(si, b.damage)) {
@@ -797,6 +822,20 @@ const loop = new Loop(
       return;
     }
 
+    // --- Pause Toggle ---
+    if (input.wasPressed('pause')) {
+      if (state.phase === 'running') {
+        state.isPaused = !state.isPaused;
+        const pauseEl = document.getElementById('pause');
+        if (pauseEl) {
+          if (state.isPaused) pauseEl.classList.remove('hidden');
+          else pauseEl.classList.add('hidden');
+        }
+      }
+    }
+
+    if (state.isPaused) return;
+
     if (state.phase !== 'running') return;
 
     state.sessionTime += dt;
@@ -814,11 +853,13 @@ const loop = new Loop(
     director.update(dt, {
       ammoNormalized: isFinite(ammoNorm) ? ammoNorm : 1,
       isPistol: state.currentWeapon.label === 'PISTOL',
+      hasSpecialWeapon: state.currentWeapon.label !== 'PISTOL',
       recentDanger: 0, // Could be increased on near misses later
     }, nearbyCount);
 
+    terrainManager.update(dt, SCROLL.BASE_SPEED);
     background.update(dt, SCROLL.BASE_SPEED);
-    player.update(dt, input, renderer.camera.right);
+    player.update(dt, input, renderer.camera.right, terrainManager);
 
     // --- Weapon / melee priority ---
     state.currentWeapon.tickCooldown(dt);
@@ -847,36 +888,31 @@ const loop = new Loop(
 
     bullets.update(dt, renderer.camera.right);
     for (const b of bullets.data) {
-      if (b.active && b.y <= WORLD.GROUND_Y) {
-        b.active = false;
+      if (b.active) {
+        // Bullets ignore platforms completely, only die on solid terrain
+        const groundY = terrainManager.getSurfaceHeight(b.x, b.y, 0, true);
+        if (b.y <= groundY) {
+          b.active = false;
+        }
       }
     }
 
-    rockets.update(dt, renderer.camera.right);
-    for (let i = 0; i < rockets.data.length; i++) {
-      const r = rockets.data[i]!;
-      if (r.active && r.y <= WORLD.GROUND_Y) {
-        rockets.killAt(i);
-        explosions.spawn(r.x, WORLD.GROUND_Y, GRENADE.EXPLOSION_RADIUS);
-        applyExplosionDamage(r.x, WORLD.GROUND_Y);
-      }
-    }
+    rockets.update(dt, renderer.camera.right, terrainManager, (rx, ry) => {
+      explosions.spawn(rx, ry, GRENADE.EXPLOSION_RADIUS);
+      applyExplosionDamage(rx, ry);
+    });
 
     // --- Enemy Entities Update ---
-    const infantryBulletY = WORLD.GROUND_Y + PLAYER.HEIGHT * 0.65;
     const screenRight = renderer.camera.right;
     
-    soldiers.update(dt, (x, _y) => {
-      if (x > screenRight || x < 0) return;
-      enemyBullets.spawn(x, infantryBulletY, -BULLET.ENEMY.SPEED, 0, 'bullet');
+    soldiers.update(dt, SCROLL.BASE_SPEED, terrainManager, player.y, (x, y) => {
+      enemyBullets.spawn(x, y + 9, -BULLET.ENEMY.SPEED, 0, 'bullet');
     });
-    shields.update(dt, (x, _y) => {
-      if (x > screenRight || x < 0) return;
-      enemyBullets.spawn(x, infantryBulletY, -BULLET.ENEMY.SPEED, 0, 'bullet');
+    shields.update(dt, SCROLL.BASE_SPEED, terrainManager, player.y, (x, y) => {
+      enemyBullets.spawn(x, y + 12, -BULLET.ENEMY.SPEED, 0, 'bullet');
     });
-    tanks.update(dt, (x, _y) => {
-      if (x > screenRight || x < 0) return;
-      enemyBullets.spawn(x, WORLD.GROUND_Y + ENEMY.CANNONBALL.SIZE / 2, -ENEMY.CANNONBALL.SPEED, 0, 'cannonball');
+    tanks.update(dt, SCROLL.BASE_SPEED, terrainManager, player.y, (x, y) => {
+      enemyBullets.spawn(x, y + 6, -ENEMY.CANNONBALL.SPEED, 0, 'cannonball');
     });
     
     helicopters.update(dt, player.x, renderer.camera.right, (x, y) => {
@@ -886,21 +922,51 @@ const loop = new Loop(
     enemyBullets.update(dt, renderer.camera.right);
     // Enemy projectiles hitting ground
     for (const b of enemyBullets.data) {
-      if (b.active && b.type === 'bomb' && b.y <= WORLD.GROUND_Y) {
-        b.active = false;
-        explosions.spawn(b.x, WORLD.GROUND_Y, GRENADE.EXPLOSION_RADIUS);
-        applyExplosionDamage(b.x, WORLD.GROUND_Y, true); // No friendly fire
+      if (b.active) {
+        // Feature: Cannonballs follow slopes (Hills/Valleys)
+        if (b.type === 'cannonball') {
+           const nextY = terrainManager.getSurfaceHeight(b.x, b.y, 0);
+           b.y = nextY + 4; // Stick to ground with a small radius offset
+        }
+
+        // Query solid ground (floor/hills/valleys) regardless of parity
+        const solidGroundY = terrainManager.getSurfaceHeight(b.x, b.y, 0, true);
+        
+        if (b.type === 'bomb') {
+          // GDD: Bomb only collides with platforms if player is at target height.
+          const platformGroundY = terrainManager.getSurfaceHeight(b.x, b.y, 0, false);
+          const hasPlatform = platformGroundY > solidGroundY;
+          const playerOnPlatform = (player.y + 10) > platformGroundY;
+
+          if (hasPlatform && playerOnPlatform) {
+              if (b.y <= platformGroundY) {
+                  b.active = false;
+                  explosions.spawn(b.x, platformGroundY, GRENADE.EXPLOSION_RADIUS);
+                  applyExplosionDamage(b.x, platformGroundY, true); 
+              }
+          } else if (b.y <= solidGroundY) {
+              b.active = false;
+              explosions.spawn(b.x, solidGroundY, GRENADE.EXPLOSION_RADIUS);
+              applyExplosionDamage(b.x, solidGroundY, true); 
+          }
+        } else if (b.y <= solidGroundY) {
+          b.active = false;
+        }
       }
     }
 
-    grenades.update(dt, WORLD.GROUND_Y, (gx, gy) => {
+    grenades.update(dt, SCROLL.BASE_SPEED, terrainManager, (gx, gy) => {
       explosions.spawn(gx, gy, GRENADE.EXPLOSION_RADIUS);
       applyExplosionDamage(gx, gy);
     });
     explosions.update(dt, SCROLL.BASE_SPEED);
-    items.update(dt, SCROLL.BASE_SPEED);
+    
+    // Items falling to terrain
+    items.update(dt, SCROLL.BASE_SPEED, terrainManager);
 
-    spawnSystem.update(dt, renderer.camera.right);
+    terrainPools.update(terrainManager.platforms, terrainManager.segments);
+
+    spawnSystem.update(dt, renderer.camera.right, terrainManager);
 
     // --- Collision Passes ---
     resolveBulletEnemyHits();

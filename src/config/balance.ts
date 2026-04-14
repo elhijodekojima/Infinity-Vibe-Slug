@@ -13,6 +13,8 @@ export const WORLD = {
   WIDTH: 480,
   /** Y position of the ground surface (player's feet). */
   GROUND_Y: 60,
+  /** Screen width (reference). */
+  SCREEN_WIDTH: 480,
 } as const;
 
 export const PLAYER = {
@@ -142,6 +144,8 @@ export const BULLET = {
     HEIGHT: 4,
     SPEED: 120,
     POOL_CAPACITY: 64,
+    FIRE_HEIGHT_OFFS: 16,
+    CANNON_HEIGHT_OFFS: 6,
   },
 } as const;
 
@@ -169,7 +173,7 @@ export const WEAPON = {
     DAMAGE: 2,
   },
   ROCKET: {
-    INTERVAL: 1.0,
+    INTERVAL: 0.66,
     INITIAL_SPEED: 40,
     ACCELERATION: 450,
     AMMO: 20,
@@ -228,6 +232,42 @@ export const DIRECTOR = {
 
 export type SpawnPhase = 'pressure' | 'swarm' | 'mixed' | 'fake_breather';
 
+// --- Combat Context Layer ---
+export type TerrainIntent = "flat" | "vertical" | "choke_low" | "high_ground" | "chaotic";
+
+export interface CombatContext {
+  phase: SpawnPhase;
+  terrainIntent: TerrainIntent;
+  pressure: number;
+  enemyDensity: number;
+  playerState: {
+    hasSpecialWeapon: boolean;
+    ammoRatio: number;
+  };
+}
+
+export const COMBAT_CONTEXT = {
+  UPDATE_INTERVAL: 0.25, // seconds
+} as const;
+
+export const TERRAIN_INTENT_WEIGHTS: Record<TerrainIntent, Partial<Record<string, number>>> = {
+  flat: {},
+  vertical: { helicopter: 1.6, shield: 1.3 },
+  choke_low: { tank: 1.5, shield: 1.2 },
+  high_ground: { tank: 1.5, helicopter: 0.7 },
+  chaotic: { soldier: 1.5, shotgunBias: 1.5 },
+};
+
+export const DROP_CONTEXT_MOD: Record<TerrainIntent, Partial<Record<string, number>>> = {
+  flat: {},
+  vertical: {},
+  chaotic: { shotgun: 1.5 },
+  choke_low: { rocket: 1.3 },
+  high_ground: { rocket: 1.2 },
+};
+// -----------------------------
+
+
 export const SPAWN = {
   RATE_START: 0.4,
   GROWTH: 0.01,
@@ -276,4 +316,54 @@ export const MELEE = {
   /** Short delay before the player can shoot again after a knife swipe. */
   HOLSTER_DELAY: 0.25,
 } as const;
+
+export type ObstacleType = 'none' | 'single' | 'stair' | 'swarm' | 'valley' | 'hill' | 'fortress';
+
+export const OBSTACLE = {
+  /** Distance between patterns (world units). 1.5 - 3 screen widths. */
+  MIN_GAP: 700,
+  MAX_GAP: 1200,
+  
+  /** Platform dimensions. */
+  PLATFORM: {
+    WIDTH_MIN: 120,
+    WIDTH_MAX: 180,
+    HEIGHT: 8,
+    JUMP_HEIGHT: 60, // Standard height reachable in one jump
+  },
+
+  /** Slope transitions. */
+  TERRAIN: {
+    SLOPE_WIDTH: 60,
+    MAX_HEIGHT_DIFF: 40,
+  },
+
+  /** Weighted selection. */
+  WEIGHTS: {
+    single: 0.35,
+    stair: 0.2,
+    valley: 0.1,
+    hill: 0.1,
+    swarm: 0.1,
+    fortress: 0.15,
+  } as Record<Exclude<ObstacleType, 'none'>, number>,
+
+  /** Soldier AI. */
+  AI: {
+    JUMP_DELAY_MIN: 0.3,
+    JUMP_DELAY_MAX: 0.7,
+    EDGE_STOP_MARGIN: 10,
+  }
+} as const;
+
+// Helper to map ObstacleType to TerrainIntent
+export const OBSTACLE_TO_INTENT: Record<Exclude<ObstacleType, 'none'>, TerrainIntent> = {
+  single: 'flat',
+  stair: 'vertical',
+  valley: 'choke_low',
+  hill: 'high_ground',
+  swarm: 'chaotic',
+  fortress: 'high_ground'
+};
+
 

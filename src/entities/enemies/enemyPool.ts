@@ -5,6 +5,7 @@ import {
   Object3D,
   Texture,
 } from 'three';
+import { PLAYER, OBSTACLE } from '../../config/balance';
 
 /**
  * Immutable configuration of a concrete enemy type.
@@ -40,14 +41,15 @@ export interface EnemyConfig {
   readonly isMeleeImmune: boolean;
   /** Sprite texture (optional). */
   readonly map?: Texture;
-}
-
-export interface EnemyData {
+}export interface EnemyData {
   active: boolean;
   /** Feet X (world units). */
   x: number;
   /** Feet Y (world units). */
   y: number;
+  /** Vertical velocity. */
+  vy: number;
+  grounded: boolean;
   /** Current hit points. Kills when <= 0. */
   hp: number;
   /** Seconds until next "decision" tick. */
@@ -62,28 +64,19 @@ export interface EnemyData {
   preFireTimer: number;
   /** If > 0, enemy is "executing" a melee attack. Player dies if they stay in range frontally. */
   meleeTimer: number;
+  /** If > 0, soldier is waiting to perform a jump/drop. */
+  jumpWaitTimer: number;
   /**
    * Active movement state:
    * - 'approach': enemy walks toward player (leftward in world coords).
-   * - 'idle':     enemy holds world-position (camera scroll still drifts
-   *               them left on-screen, so they never truly stand still
-   *               from the player's perspective).
-   * Tanks ignore this field — they always approach.
+   * - 'idle':     enemy holds world-position.
    */
   behaviorState: 'approach' | 'idle';
 }
 
 /**
  * Generic ground-enemy pool: one `InstancedMesh` + a data array of the
- * same length. The update loop walks the array, advances each active
- * enemy, and at the end packs the active ones into the first N instance
- * slots of the mesh before setting `count`. Zero runtime allocation.
- *
- * Behavior per the GDD:
- *   - Walk left at `config.speed`.
- *   - Occasionally pause for 0.25–0.8 s at the end of a 1.2–3 s think
- *     window, with probability `config.hesitateChance`.
- *   - Despawn off-screen to the left.
+ * same length. 
  */
 export class EnemyPool {
   public readonly mesh: InstancedMesh;
@@ -99,7 +92,7 @@ export class EnemyPool {
       color: config.color,
       map: config.map || null,
       transparent: !!config.map,
-      alphaTest: 0.5, // Standard for crisp pixel cutouts
+      alphaTest: 0.5, 
     });
     this.mesh = new InstancedMesh(geom, mat, config.poolCapacity);
     this.mesh.count = 0;
@@ -111,6 +104,8 @@ export class EnemyPool {
         active: false,
         x: 0,
         y: 0,
+        vy: 0,
+        grounded: true,
         hp: 0,
         thinkTimer: 0,
         hesitatingFor: 0,
@@ -118,6 +113,7 @@ export class EnemyPool {
         shootTimer: 0,
         preFireTimer: 0,
         meleeTimer: 0,
+        jumpWaitTimer: 0,
         behaviorState: 'approach',
       };
     }
@@ -131,6 +127,8 @@ export class EnemyPool {
         d.active = true;
         d.x = x;
         d.y = y;
+        d.vy = 0;
+        d.grounded = true;
         d.hp = this.config.hp;
         d.thinkTimer = 1 + Math.random() * 1.5;
         d.hesitatingFor = 0;
@@ -138,7 +136,7 @@ export class EnemyPool {
         d.shootTimer = 1.0 + Math.random() * 2.0;
         d.preFireTimer = 0;
         d.meleeTimer = 0;
-        // Tanks start approaching immediately; infantry starts with a random state
+        d.jumpWaitTimer = 0;
         d.behaviorState = this.config.label === 'tank' ? 'approach' : (Math.random() < 0.5 ? 'approach' : 'idle');
         return true;
       }
@@ -146,76 +144,122 @@ export class EnemyPool {
     return false;
   }
 
-  update(dt: number, spawnProjectile?: (x: number, y: number) => void): void {
+  update(dt: number, scrollSpeed: number, terrain: any, playerY: number, spawnProjectile?: (x: number, y: number) => void): void {
     const { speed, hesitateChance, width, poolCapacity, label } = this.config;
     const activeCount = this.activeCount;
 
     for (let i = 0; i < poolCapacity; i++) {
       const d = this.data[i]!;
       if (!d.active) continue;
+      
+      // World scroll: keep enemies attached to platforms
+      const scrollDelta = scrollSpeed * dt;
+      d.x -= scrollDelta;
+      // --- Physics ---
+      if (!d.grounded) {
+        d.vy += PLAYER.GRAVITY * dt;
+      }
+      d.y += d.vy * dt;
+
+      const surfaceY = terrain.getSurfaceHeight(d.x, d.y, d.vy);
+      if (d.y <= surfaceY && d.vy <= 0) {
+        d.y = surfaceY;
+        d.vy = 0;
+        d.grounded = true;
+      } else if (d.y > surfaceY + 2) { // Buffer to avoid floating state on tiny deltas
+        d.grounded = false;
+      }
 
       // Melee logic timer
       if (d.meleeTimer > 0) {
         d.meleeTimer -= dt;
       }
 
-      // --- Pre-fire stop: when counting down, enemy is frozen
+      // --- Pre-fire stop ---
       if (d.preFireTimer > 0) {
         d.preFireTimer -= dt;
         if (d.preFireTimer <= 0 && spawnProjectile) {
-          // Stop elapsed — now actually fire
-          spawnProjectile(d.x, d.y + this.config.height * 0.6);
+          const fireY = label === 'tank' 
+            ? d.y + 6 
+            : d.y + this.config.height * 0.65;
+          spawnProjectile(d.x, fireY);
         }
-        // Skip movement while aiming
         continue;
       }
 
-      // Shooting logic — all types fire, tanks reset timer longer
+      // Shooting logic
       d.shootTimer -= dt;
       if (d.shootTimer <= 0) {
-        // Fire rate increases with density (approx 5-25% chance per attempt)
         const prob = 0.05 + (activeCount / poolCapacity) * 0.2;
         if (Math.random() < prob) {
-          // Start the pre-fire pause (enemy stops to aim)
           d.preFireTimer = 0.75;
         }
-        // Tanks fire less frequently than infantry
         d.shootTimer = label === 'tank'
           ? 3.0 + Math.random() * 5.0
           : 2.0 + Math.random() * 4.0;
       }
 
-      // --- Movement state machine ---
-      // Pre-fire and hesitate freeze movement in all cases.
+      // --- Movement & AI ---
       if (d.preFireTimer > 0 || d.hesitatingFor > 0) {
         d.hesitatingFor -= dt;
-      } else if (label === 'tank') {
-        // Tank ALWAYS advances. No idle, no hesitate, no stopping.
+        continue;
+      }
+
+      // Edge Detection & Vertical AI
+      const atEdge = terrain.isFallingEdge(d.x - speed * dt, d.y);
+      
+      if (label === 'soldier') {
+        if (d.jumpWaitTimer > 0) {
+          d.jumpWaitTimer -= dt;
+          if (d.jumpWaitTimer <= 0) {
+            if (playerY > d.y + 20) {
+              // Perform Jump
+              d.vy = PLAYER.JUMP_VELOCITY * 0.8;
+              d.grounded = false;
+            } else {
+              // Just drop (walk forward)
+              d.x -= speed * dt;
+            }
+          }
+          continue;
+        }
+
+        if (atEdge && d.grounded) {
+          const dy = playerY - d.y;
+          // If player is on a different level, wait then transition
+          if (Math.abs(dy) > 20) {
+            d.jumpWaitTimer = OBSTACLE.AI.JUMP_DELAY_MIN + Math.random() * (OBSTACLE.AI.JUMP_DELAY_MAX - OBSTACLE.AI.JUMP_DELAY_MIN);
+            continue;
+          }
+        }
+      } else {
+        // Shield/Tank stop at edges
+        if (atEdge && d.grounded) {
+           continue; // Stop movement for THIS enemy, but continue the loop for others.
+        }
+      }
+
+      // Normal approach
+      if (label === 'tank') {
         d.x -= speed * dt;
       } else if (d.behaviorState === 'approach') {
-        // Active walk toward the player
         d.x -= speed * dt;
         d.thinkTimer -= dt;
         if (d.thinkTimer <= 0) {
           const r = Math.random();
           if (r < 0.35) {
-            // Switch to idle stance
             d.behaviorState = 'idle';
             d.thinkTimer = 0.8 + Math.random() * 1.5;
           } else if (r < 0.35 + hesitateChance) {
-            // Brief hesitation pause
             d.hesitatingFor = 0.25 + Math.random() * 0.55;
             d.thinkTimer = 1.2 + Math.random() * 1.8;
           } else {
-            // Continue approaching
             d.thinkTimer = 1.2 + Math.random() * 1.8;
           }
         }
       } else {
-        // 'idle' — enemy holds world position (camera scroll still moves them)
         d.thinkTimer -= dt;
         if (d.thinkTimer <= 0) {
-          // Always resume approaching after idle
           d.behaviorState = 'approach';
           d.thinkTimer = 1.5 + Math.random() * 2.0;
         }
