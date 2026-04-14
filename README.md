@@ -6,25 +6,21 @@
 
 ## 🚀 Características Principales
 
-- **Acción Frenética:** Scroll automático que te obliga a mantenerte en movimiento.
-- **Estética Retro:** Inspirado fielmente en el estilo visual y sonoro de los 16 bits.
-- **Modo Survival:** Aguanta oleadas infinitas con dificultad progresiva.
-- **Sistema de Armas:** Desde la clásica pistola hasta el devastador *Shotgun* y *Rocket Launcher*.
-- **Multijugador Local:** ¡Compite o colabora con un amigo en el mismo teclado!
+- **Acción Frenética:** Scroll automático con cámara reactiva.
+- **Difficulty Director:** Sistema inteligente de fases (`Pressure`, `Swarm`, `Mixed`) que adapta la intensidad según tu nivel de juego.
+- **Drops Contextuales:** El sistema de botín analiza tu estado (munición, peligro) para entregarte el recurso exacto que necesitas.
+- **Estética Neogeo:** Gráficos procedurales y animaciones fluidas generadas íntegramente en runtime.
+- **Gameplay Pulido:** Salto variable, apuntado multidireccional y ataques aéreos.
 
 ---
 
 ## 🕹️ Controles
 
-### Jugador 1
-- **WASD:** Movimiento y Salto.
-- **Espacio:** Disparar.
-- **E:** Lanzar Granada.
-
-### Jugador 2 (Opcional)
-- **Flechas:** Movimiento y Salto.
-- **Teclado Numérico 0:** Disparar.
-- **Teclado Numérico .:** Lanzar Granada.
+- **A / D**: Moverse a la izquierda / derecha.
+- **W / S**: Apuntar arriba / agacharse (o apuntar abajo en el aire).
+- **Space**: Saltar (mantener para mayor altura).
+- **J**: Disparar (automático con Machinegun).
+- **K**: Lanzar Granada.
 
 ---
 
@@ -47,13 +43,15 @@
 
 ---
 
-## 📈 Desarrollo y Futuro
+## 📈 Desarrollo (Roadmap)
 
-- [ ] Implementación de físicas de salto y scroll automático.
-- [ ] Sistema de IA para enemigos y escalado de dificultad.
-- [ ] Integración de efectos de sonido y música de 16-bits.
-- [ ] Leaderboard arcade (High-scores de 3 letras).
-- [ ] Sistema de logros.
+- [x] Arquitectura Zero-Loading y Core Loop.
+- [x] Sistema de Combate y Arsenal Completo.
+- [x] Difficulty Director y Performance Coupling.
+- [x] Mecánicas de Agachado y Apuntado vertical.
+- [ ] Implementación de enemigos voladores (Heli-2).
+- [ ] Efectos de sonido procedurales (Web Audio API).
+- [ ] Leaderboard arcade (localStorage).
 
 ---
 

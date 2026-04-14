@@ -402,3 +402,41 @@
 #### ➡️ Siguiente paso
 
 - Implementar enemigos voladores que aprovechen el nuevo sistema de apuntado vertical.
+
+---
+
+### [2026-04-14] — Major Gameplay & Difficulty Refactor
+
+**Estado general:** 🟢 verde
+**Bundle size actual:** ≈ 54 KB (gzip)
+**Tiempo a primer paint:** < 100 ms
+
+#### ✅ Hecho
+
+- **Difficulty Director (src/systems/difficultyDirector.ts):**
+  - Implementado sistema de fases (`Pressure`, `Swarm`, `Mixed`, `FakeBreather`) para gestionar el ritmo del juego.
+  - El sistema calcula un **Pressure Score** dinámico basado en densidad de enemigos, niveles de munición del jugador y tiempo transcurrido desde el último drop.
+  - La dificultad es ahora reactiva: escala más rápido si el jugador domina y da respiros si está agobiado.
+- **Dynamic Drop System (Refactoreado):**
+  - Selección de items mediante **RNG ponderado** basado en el contexto.
+  - El sistema favorece armas específicas según la necesidad: baja munición → armas; alta densidad → escopeta; presencia de tanques → lanzacohetes.
+  - Implementada rampa de **Progressive Pity** que garantiza drops tras 25 bajas sin botín.
+- **Gameplay Polish & Fixes:**
+  - **Variable Jump Height**: Implementada física de salto dependiente de la duración de pulsación (Space).
+  - **Ground Collision**: Las balas y perdigones ahora se destruyen al tocar el suelo; los cohetes detonan provocando explosión visual y daño AoE.
+  - **Helicopter Bombs**: Corregido el fuego aliado (no dañan enemigos terrestres) y añadida muerte instantánea al contacto con el jugador.
+  - **Countdown Sequence**: Añadida una cuenta atrás de 3 segundos (temporizador de 4s) con mensaje "START MISSION" antes de iniciar el run.
+- **HUD & UI**:
+  - Actualización del HUD para soportar mensajes overlay de cuenta atrás.
+  - Optimización de refresco de HUD en el main loop.
+
+#### 🧠 Decisiones
+- **AD-033 — Difficulty Director**: Priorizar el "feel" arcade mediante cambios bruscos de fase en lugar de un escalado lineal aburrido.
+- **AD-034 — Contextual Drops**: El juego ayuda al jugador de forma invisible pero justa, mejorando la retención y la "power fantasy".
+
+#### 🐞 Problemas / Bloqueos
+- **Import Error**: Error detectado y corregido en `main.ts` tras el refactor.
+- **Countdown Timing**: Ajustado a 4s para asegurar visibilidad del número "3".
+
+#### ➡️ Siguiente paso
+- Implementación de enemigos voladores y efectos de sonido (Web Audio API).

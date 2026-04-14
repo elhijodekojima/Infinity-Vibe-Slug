@@ -36,6 +36,7 @@ import { ItemPool, type ItemType } from './entities/items/itemPool';
 import { HelicopterPool } from './entities/enemies/helicopterPool';
 import { EnemyBulletPool } from './entities/bullets';
 import { SpawnSystem } from './systems/spawnSystem';
+import { DifficultyDirector } from './systems/difficultyDirector';
 import { 
   getSoldierTexture, 
   getShieldTexture, 
@@ -49,7 +50,7 @@ import {
 } from './gfx/itemSprite';
 import { aabbOverlap, type AABB } from './systems/collisions';
 import { initMenu, showMenu } from './ui/menu';
-import { initHUD, updateHUD, showHUD, hideHUD } from './ui/hud';
+import { initHUD, updateHUD, showHUD, hideHUD, showCountdown, hideCountdown } from './ui/hud';
 import { initGameOver, showGameOver, type GameOverStats } from './ui/gameover';
 import {
   PLAYER,
@@ -61,8 +62,10 @@ import {
   WEAPON,
   DROP,
   WORLD,
+  DIRECTOR,
 } from './config/balance';
 import { COLORS } from './config/colors';
+
 
 // ---------------------------------------------------------------------------
 // Enemy pool configs — three flavors, one class.
@@ -177,7 +180,8 @@ const arsenal: Record<string, Weapon> = {
   shotgun: weaponShotgun,
   rocket: weaponRocket,
 };
-const spawnSystem = new SpawnSystem(soldiers, shields, tanks, helicopters);
+const director = new DifficultyDirector();
+const spawnSystem = new SpawnSystem(director, soldiers, shields, tanks, helicopters);
 
 // Unified resize handler: renderer first, then anything that depends on
 // the updated camera frustum (currently just the background quad).
@@ -192,19 +196,19 @@ window.addEventListener('resize', onResize);
 // Game state
 // ---------------------------------------------------------------------------
 
-type Phase = 'menu' | 'running' | 'gameover';
+type Phase = 'menu' | 'counting' | 'running' | 'gameover';
 
 const state = {
   phase: 'menu' as Phase,
   score: 0,
   kills: 0,
   sessionTime: 0,
+  countdown: 4,
   grenades: PLAYER.START_GRENADES as number,
   username: 'AAA',
   currentWeapon: weaponPistol as Weapon,
   shootDelay: 0,
   globalShotId: 0,
-  killsSinceLastDrop: 0,
   lastDropSpawnTime: 0,
   /** Cooldown in seconds between grenade throws. */
   grenadeCooldown: 0,
@@ -255,7 +259,8 @@ function startGame(username: string): void {
   state.sessionTime = 0;
   state.grenades = PLAYER.START_GRENADES;
   state.grenadeCooldown = 0;
-  state.phase = 'running';
+  state.countdown = 4;
+  state.phase = 'counting';
 
   player.reset();
   
@@ -264,12 +269,15 @@ function startGame(username: string): void {
   state.currentWeapon = weaponPistol;
   state.shootDelay = 0;
   state.globalShotId = 0;
-  state.killsSinceLastDrop = 0;
 
   meleeCooldown = 0;
   resetAllPools();
   spawnSystem.reset();
-
+  
+  // NEW: Also reset difficulty director
+  // (We'll just create a new one to be safe)
+  // director.reset(); // If we had a reset
+  
   refreshHUD();
   showHUD();
 }
@@ -278,26 +286,66 @@ function startGame(username: string): void {
  * Check for a drop on enemy death. 
  */
 function handleEnemyDeath(x: number, y: number, isAir = false): void {
-  state.killsSinceLastDrop++;
+  director.registerKill();
   state.kills++;
 
   const now = performance.now() / 1000;
   if (now - state.lastDropSpawnTime < 1.0) return;
 
-  let shouldDrop = Math.random() < DROP.CHANCE;
-  if (state.killsSinceLastDrop >= DROP.PITY_THRESHOLD) {
+  const chance = director.dropChance;
+  let shouldDrop = Math.random() < chance;
+  
+  if (director.isHardPity) {
     shouldDrop = true;
   }
 
   if (shouldDrop) {
     state.lastDropSpawnTime = now;
-    state.killsSinceLastDrop = 0;
+    director.registerDrop();
+    
+    // 🎲 Weighted selection Logic
     const types: ItemType[] = ['machinegun', 'shotgun', 'rocket', 'grenade'];
-    const type = types[Math.floor(Math.random() * types.length)]!;
-    // isAir = true triggers parachute for helicopter drops
-    items.spawn(x, y, type, isAir);
+    const weights: Record<ItemType, number> = {
+      machinegun: 1.0,
+      shotgun: 1.0,
+      rocket: 1.0,
+      grenade: 0.5, // Grenades slightly rarer by default
+    };
+
+    // Context adjustments
+    if (state.currentWeapon.label !== 'PISTOL') {
+      // If already has weapon, increase grenade weight (downgrade chance)
+      weights.grenade += 1.0;
+      // Reduce weight of the current weapon
+      const current = state.currentWeapon.label.toLowerCase() as ItemType;
+      if (weights[current]) weights[current] *= 0.5;
+    }
+
+    // High Density → Shotgun weight boost
+    // (A bit simplified context check here)
+    const enemiesCount = enemyPools.reduce((acc, p) => acc + p.data.filter(e => e.active).length, 0);
+    if (enemiesCount > 8) weights.shotgun += 1.5;
+    
+    // Tank presence → Rocket boost
+    if (tanks.data.some(t => t.active)) weights.rocket += 1.5;
+
+    // Pick weighted result
+    const itemsList = Object.keys(weights) as ItemType[];
+    const totalWeight = Object.values(weights).reduce((a, b) => a + b, 0);
+    let r = Math.random() * totalWeight;
+    let selected: ItemType = 'machinegun';
+    for (const type of itemsList) {
+      r -= weights[type];
+      if (r <= 0) {
+        selected = type;
+        break;
+      }
+    }
+
+    items.spawn(x, y, selected, isAir);
   }
 }
+
 
 function endGame(): void {
   if (state.phase !== 'running') return;
@@ -521,15 +569,16 @@ function resolvePlayerEnemyHits(): boolean {
   return false;
 }
 
-/** Apply AoE damage from a grenade detonation across every enemy pool. */
-function applyExplosionDamage(cx: number, cy: number): void {
+/** Apply AoE damage from a detonation across every enemy pool. */
+function applyExplosionDamage(cx: number, cy: number, excludeEnemies = false): void {
+  if (excludeEnemies) return; // Currently, explosions from enemy bombs only affect player via a separate check.
+
   for (const pool of enemyPools) {
     const sData = pool.data;
     const halfH = pool.config.height / 2;
     for (let si = 0; si < sData.length; si++) {
       const s = sData[si]!;
       if (!s.active) continue;
-      // Skip off-screen enemies
       if (s.x > renderer.camera.right || s.x < -pool.config.width) continue;
       const dx = s.x - cx;
       const dy = (s.y + halfH) - cy;
@@ -545,7 +594,6 @@ function applyExplosionDamage(cx: number, cy: number): void {
   for (let hi = 0; hi < helicopters.data.length; hi++) {
     const h = helicopters.data[hi]!;
     if (!h.active) continue;
-    // Skip off-screen helicopters
     if (h.x > renderer.camera.right || h.x < -ENEMY.HELICOPTER.WIDTH) continue;
     const dx = h.x - cx;
     const dy = h.y - cy;
@@ -557,6 +605,7 @@ function applyExplosionDamage(cx: number, cy: number): void {
     }
   }
 }
+
 
 /** Player vs Enemy Projectiles */
 function resolveEnemyBulletPlayerHits(): void {
@@ -573,16 +622,19 @@ function resolveEnemyBulletPlayerHits(): void {
     const bBox = { x: b.x, y: b.y, w: s, h: s };
     if (aabbOverlap(pBox, bBox)) {
       if (b.type === 'bomb') {
-        // Bomb triggers explosion on player contact
+        // Bomb triggers explosion on player contact + INSTANT DEATH
         enemyBullets.killAt(i);
         explosions.spawn(b.x, b.y, GRENADE.EXPLOSION_RADIUS);
-        resolveExplosionPlayerHits(b.x, b.y);
+        // excludeEnemies = true: no friendly fire
+        applyExplosionDamage(b.x, b.y, true); 
+        endGame(); // Direct contact = instant death
       } else {
         endGame();
       }
     }
   }
 }
+
 
 /** Check if player is caught in a mushroom/bomb explosion */
 function resolveExplosionPlayerHits(cx: number, cy: number): void {
@@ -733,27 +785,52 @@ function resolvePlayerItemPickups(): void {
 
 const loop = new Loop(
   (dt) => {
+    if (state.phase === 'counting') {
+      state.countdown -= dt;
+      if (state.countdown <= 0) {
+        state.phase = 'running';
+        hideCountdown();
+      } else {
+        const text = state.countdown > 1 ? Math.ceil(state.countdown - 1).toString() : 'START MISSION';
+        showCountdown(text);
+      }
+      return;
+    }
+
     if (state.phase !== 'running') return;
 
     state.sessionTime += dt;
 
+    // --- Difficulty Director Update ---
+    // Count enemies within pressure radius
+    const nearbyCount = enemyPools.reduce((acc, pool) => {
+      const activeInRadius = pool.data.filter(e => e.active && Math.abs(e.x - player.x) < DIRECTOR.PRESSURE_RADIUS);
+      return acc + activeInRadius.length;
+    }, 0);
+    
+    // Low ammo factor for pressure
+    const ammoNorm = state.currentWeapon.ammo / ((WEAPON as any)[state.currentWeapon.label.split(' ')[0].toUpperCase()]?.AMMO || 1);
+    
+    director.update(dt, {
+      ammoNormalized: isFinite(ammoNorm) ? ammoNorm : 1,
+      isPistol: state.currentWeapon.label === 'PISTOL',
+      recentDanger: 0, // Could be increased on near misses later
+    }, nearbyCount);
+
     background.update(dt, SCROLL.BASE_SPEED);
     player.update(dt, input, renderer.camera.right);
 
-    // --- Weapon / melee priority (GDD: fire + in contact → knife > bullet) ---
+    // --- Weapon / melee priority ---
     state.currentWeapon.tickCooldown(dt);
     meleeCooldown = Math.max(0, meleeCooldown - dt);
     state.shootDelay = Math.max(0, state.shootDelay - dt);
 
     const fireDown = input.isDown('fire');
     const firePressed = input.wasPressed('fire');
-
     const shouldAttemptFire = state.currentWeapon.isAutomatic ? fireDown : firePressed;
 
     if (shouldAttemptFire && state.shootDelay <= 0) {
-      // Melee is only edge-triggered (firePressed) to avoid knife-spamming.
       const didMelee = firePressed ? tryMelee() : false;
-      
       if (!didMelee) {
         if (state.currentWeapon.tryFire(bullets, player.muzzleX, player.muzzleY, state.globalShotId, player.aimAngle)) {
           state.globalShotId++;
@@ -761,7 +838,6 @@ const loop = new Loop(
       }
     }
     
-    // Auto-switch to pistol when special ammo is out.
     if (state.currentWeapon !== weaponPistol && state.currentWeapon.ammo <= 0) {
       state.currentWeapon = weaponPistol;
     }
@@ -770,19 +846,28 @@ const loop = new Loop(
     if (input.wasPressed('grenade') && state.grenadeCooldown <= 0) tryThrowGrenade();
 
     bullets.update(dt, renderer.camera.right);
-    // Extra pass for bullet ground collision check
     for (const b of bullets.data) {
       if (b.active && b.y <= WORLD.GROUND_Y) {
         b.active = false;
       }
     }
 
+    rockets.update(dt, renderer.camera.right);
+    for (let i = 0; i < rockets.data.length; i++) {
+      const r = rockets.data[i]!;
+      if (r.active && r.y <= WORLD.GROUND_Y) {
+        rockets.killAt(i);
+        explosions.spawn(r.x, WORLD.GROUND_Y, GRENADE.EXPLOSION_RADIUS);
+        applyExplosionDamage(r.x, WORLD.GROUND_Y);
+      }
+    }
+
     // --- Enemy Entities Update ---
-    // Infantry bullets fly at player chest height so crouching dodges them.
     const infantryBulletY = WORLD.GROUND_Y + PLAYER.HEIGHT * 0.65;
     const screenRight = renderer.camera.right;
+    
     soldiers.update(dt, (x, _y) => {
-      if (x > screenRight || x < 0) return; // off-screen, no shooting
+      if (x > screenRight || x < 0) return;
       enemyBullets.spawn(x, infantryBulletY, -BULLET.ENEMY.SPEED, 0, 'bullet');
     });
     shields.update(dt, (x, _y) => {
@@ -795,48 +880,45 @@ const loop = new Loop(
     });
     
     helicopters.update(dt, player.x, renderer.camera.right, (x, y) => {
-      // Drop bomb from heli
       enemyBullets.spawn(x, y, 0, -ENEMY.BOMB.SPEED, 'bomb');
     });
 
     enemyBullets.update(dt, renderer.camera.right);
-    // Enemy bullets that hit ground (except cannonball which rolls)
+    // Enemy projectiles hitting ground
     for (const b of enemyBullets.data) {
       if (b.active && b.type === 'bomb' && b.y <= WORLD.GROUND_Y) {
         b.active = false;
         explosions.spawn(b.x, WORLD.GROUND_Y, GRENADE.EXPLOSION_RADIUS);
-        applyExplosionDamage(b.x, WORLD.GROUND_Y);
-        resolveExplosionPlayerHits(b.x, WORLD.GROUND_Y);
+        applyExplosionDamage(b.x, WORLD.GROUND_Y, true); // No friendly fire
       }
     }
 
-    rockets.update(dt, renderer.camera.right);
-    items.update(dt, SCROLL.BASE_SPEED);
-    spawnSystem.update(dt, renderer.camera.right);
-
-    // Grenade physics + detonation in a single pass. Callback fires once
-    // per explosion so we can spawn the visual flash and apply AoE damage
-    // atomically.
-    grenades.update(dt, SCROLL.BASE_SPEED, (gx, gy) => {
+    grenades.update(dt, WORLD.GROUND_Y, (gx, gy) => {
       explosions.spawn(gx, gy, GRENADE.EXPLOSION_RADIUS);
       applyExplosionDamage(gx, gy);
     });
     explosions.update(dt, SCROLL.BASE_SPEED);
+    items.update(dt, SCROLL.BASE_SPEED);
 
+    spawnSystem.update(dt, renderer.camera.right);
+
+    // --- Collision Passes ---
     resolveBulletEnemyHits();
     resolveRocketEnemyHits();
     resolveEnemyBulletPlayerHits();
     resolvePlayerItemPickups();
-    refreshHUD();
 
     if (resolvePlayerEnemyHits()) {
       endGame();
     }
+
+    refreshHUD();
   },
   () => {
     renderer.render();
   },
 );
+
 loop.start();
 
 // ---------------------------------------------------------------------------

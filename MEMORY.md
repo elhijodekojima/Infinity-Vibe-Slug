@@ -66,6 +66,16 @@
 **Decisión:** Implementar apuntado hacia arriba (gradual) y hacia abajo (instantáneo en aire). Agacharse reduce velocidad y hitbox al 50%.
 **Razón:** Profundiza la táctica defensiva y permite atacar enemigos voladores (futuro) o vulnerables cenitalmente (escudos).
 
+### AD-033 — Difficulty Director (Performance Coupling)
+**Fecha:** 2026-04-14
+**Decisión:** Reemplazar escalado lineal de enemigos por un Director de Dificultad reactivo basado en el "Pressure Score" (densidad de enemigos, munición, peligro reciente).
+**Razón:** Evita el aburrimiento en rachas de dominio y el agobio injusto, creando loops de tensión y alivio arcade.
+
+### AD-034 — Context-Aware Drop System
+**Fecha:** 2026-04-14
+**Decisión:** Selección de items ponderada por el estado del jugador (baja munición → más armas; mucha densidad → escopeta; tanques → cohetes).
+**Razón:** Ayuda al jugador cuando lo necesita y potencia la "fantasía de poder" en momentos críticos de forma orgánica.
+
 ---
 
 ## 📁 Estructura de carpetas propuesta (Zero-Loading)
@@ -188,8 +198,9 @@ infinity-vibe-slug/
 - ✅ PASO 4: Combate base, granadas y enemigos (soldier/shield/tank).
 - ✅ PASO 5: Arsenal completo y sistema de Drops.
 - ✅ PASO 6: Acrobacias (Crouch, Aim Up/Down) y remapa de controles.
+- ✅ PASO 7: Difficulty Director, Dynamic Drops y Gameplay Polish.
 - ⏸️ **Pendiente:** Implementación de enemigos voladores y efectos de sonido.
 
 ---
 
-**Última actualización:** 2026-04-12
+**Última actualización:** 2026-04-14

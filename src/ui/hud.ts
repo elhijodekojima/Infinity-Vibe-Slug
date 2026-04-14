@@ -20,6 +20,8 @@ let weaponEl: HTMLElement;
 let grenEl: HTMLElement;
 let rootEl: HTMLElement;
 
+let countEl: HTMLElement;
+
 export function initHUD(): void {
   rootEl   = byId('hud');
   scoreEl  = byId('hud-score');
@@ -27,6 +29,7 @@ export function initHUD(): void {
   timerEl  = byId('hud-timer');
   weaponEl = byId('hud-weapon');
   grenEl   = byId('hud-grenades');
+  countEl  = byId('hud-countdown');
 }
 
 export function updateHUD(state: HUDState): void {
@@ -38,9 +41,19 @@ export function updateHUD(state: HUDState): void {
   grenEl.textContent   = `♦ ${state.grenades}`;
 }
 
+export function showCountdown(text: string): void {
+  countEl.textContent = text;
+  countEl.classList.remove('hidden');
+}
+
+export function hideCountdown(): void {
+  countEl.classList.add('hidden');
+}
+
 export function showHUD(): void {
   rootEl.classList.remove('hidden');
 }
+
 
 export function hideHUD(): void {
   rootEl.classList.add('hidden');

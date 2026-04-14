@@ -118,22 +118,20 @@
 - **Escopeta:** ≈ `1/150` (ajustable).
 - **Rocket Launcher:** ≈ `1/150` (más raro en práctica por pity).
 
-### 2. Pity System
-- Estilo Hearthstone: garantizar un drop cada `X` bajas sin drop.
-- **Thresholds propuestos:**
-  - Machinegun: 300 bajas.
-  - Escopeta: 150 bajas.
-  - Rocket Launcher: 100 bajas.
-- **A decidir:** pity **duro** (drop forzado) vs **dinámico** (rampa exponencial de probabilidad).
+### 2. Progressive Pity System
+- Se ha implementado un sistema de **Pity dinámico** que aumenta la probabilidad base linealmente con cada baja sin drop.
+- **Progressive Pity**: `p_final = (base + kills_since_last * pity_boost) * difficulty_mult`.
+- **Hard Pity**: Al alcanzar las 25 bajas sin drop (`PITY_THRESHOLD`), el sistema garantiza un drop en la siguiente baja.
 
-### 3. Modificadores dinámicos
-- Densidad de enemigos en pantalla.
-- Velocidad actual del juego.
-- Presión de enemigos (cercanía al jugador).
-- Peso probabilístico relativo: machinegun (más común) > escopeta > rocket (más raro).
+### 3. Modificadores dinámicos (Context-Aware)
+El Director de Dificultad ajusta los pesos de aparición según el estado del jugador:
+- **Baja Munición**: Incrementa drásticamente el peso de las armas frente a las granadas.
+- **Weapon Holding**: Si el jugador ya tiene un arma especial, se incrementa el peso de las granadas para fomentar el uso de estas.
+- **Alta Densidad de Enemigos**: Aumenta el peso de la **Escopeta** para facilitar el control de masas.
+- **Presencia de Tanques**: Incrementa el peso del **Rocket Launcher** para ayudar con objetivos blindados.
 
 ### Nota de balance
-> "El sistema debe permitir el dropeo más o menos frecuente sin ser generoso, ayudar cuando se deba y castigar al que desperdicie."
+> "El sistema ayuda de forma invisible pero orgánica, potenciando la fantasía de poder en momentos de caos y asegurando que el jugador nunca se quede sin recursos críticos si juega agresivamente."
 
 ---
 
@@ -155,20 +153,18 @@
 
 > El juego es infinito → el jugador **DEBE** perder.
 
-### Factores (por importancia)
+### 1. Difficulty Director (Fases de Intensidad)
+El juego ya no escala de forma lineal, sino que utiliza un **Director de Dificultad** que alterna entre fases para crear picos de tensión:
+- **Swarm Phase**: Alta densidad de soldados rasos.
+- **Pressure Phase**: Aumenta la frecuencia de escudos y tanquetas.
+- **Mixed Phase**: Combinación equilibrada de todos los tipos.
+- **Fake Breather**: Breve periodo de calma aparente antes de una oleada masiva.
 
-1. **Cantidad de enemigos (el más importante)**
-   - Escalado **exponencial e infinito**.
-   - Comienzo: spawns muy lentos.
-
-2. **Calidad de enemigos**
-   - Probabilidades base iniciales: **90% raso / 9% escudo / 1% tanqueta**.
-   - Cap final: **70% raso / 20% escudo / 10% tanqueta**.
-   - Deslizamiento paulatino.
-
-3. **Velocidad del juego**
-   - No característica del Metal Slug original.
-   - Aumento muy lento hasta un cap que no sature pero se note.
+### 2. Performance Coupling (Pressure Score)
+La dificultad reacciona al rendimiento del jugador mediante un **Pressure Score**:
+- **Jugador Dominando** (Bajo Pressure): Aumenta drásticamente el spawn rate y reduce los drops para forzar errores.
+- **Jugador Agobiado** (Alto Pressure): Reduce el spawn rate y aumenta la probabilidad de drops útiles para permitir reequilibrio.
+- Factores de presión: Densidad de enemigos cercanos, falta de munición, tiempo sin drops y peligro reciente.
 
 ---
 

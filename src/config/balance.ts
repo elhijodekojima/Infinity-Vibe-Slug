@@ -181,25 +181,77 @@ export const DROP = {
   ITEM_SIZE: 16,
   /** Gravity while falling. */
   GRAVITY: -400,
-  /** Chance to drop an item on enemy death (0-1). */
-  CHANCE: 0.15,
+  /** Base probability per kill (0-1). Reduced from 0.15 for dynamic scaling. */
+  BASE_CHANCE: 0.1,
+  /** Minimum chance even at low pressure. */
+  MIN_CHANCE: 0.05,
+  /** Absolute cap for drop chance. */
+  MAX_CHANCE: 0.35,
+  /** Pressure multiplier for drop chance. */
+  PRESSURE_MULT: 0.25,
+  /** Progressive pity boost per kill without drop. */
+  PITY_BOOST: 0.02,
   /** Forced drop after this many kills without one. */
-  PITY_THRESHOLD: 12,
+  PITY_THRESHOLD: 20,
   POOL_CAPACITY: 8,
   GRENADE_AMOUNT: 5,
 } as const;
 
-/**
- * Exponential spawn rate curve.
- */
+export const DIRECTOR = {
+  /** Radius around player to count enemies for pressure (world units). */
+  PRESSURE_RADIUS: 200,
+  /** How often to update the director state (seconds). */
+  UPDATE_INTERVAL: 0.5,
+  /** Min phase duration. */
+  PHASE_MIN_DURATION: 15,
+  /** Max phase duration. */
+  PHASE_MAX_DURATION: 30,
+  
+  /** Weights for pressure calculation. */
+  WEIGHTS: {
+    ENEMIES_NEARBY: 0.4,
+    TIME_SINCE_DROP: 0.3,
+    LOW_AMMO: 0.6,
+    DANGER: 0.8,
+  },
+
+  /** Performance coupling multipliers. */
+  DOMINATING: {
+    SPAWN_MULT: 1.3,
+    DROP_MULT: 0.7,
+  },
+  STRUGGLING: {
+    SPAWN_MULT: 0.8,
+    DROP_MULT: 1.5,
+  }
+} as const;
+
+export type SpawnPhase = 'pressure' | 'swarm' | 'mixed' | 'fake_breather';
+
 export const SPAWN = {
   RATE_START: 0.4,
   GROWTH: 0.01,
   RATE_CAP: 4,
   INITIAL_DELAY: 1.5,
-  TYPE_RAMP_TIME: 180,
-  TYPE_START: { soldier: 0.85, shield: 0.09, tank: 0.05, helicopter: 0.01 },
-  TYPE_CAP:   { soldier: 0.65, shield: 0.20, tank: 0.10, helicopter: 0.05 },
+  
+  PHASES: {
+    pressure: {
+      rateMult: 0.8,
+      weights: { soldier: 0.4, shield: 0.4, tank: 0.15, helicopter: 0.05 }
+    },
+    swarm: {
+      rateMult: 1.4,
+      weights: { soldier: 0.9, shield: 0.08, tank: 0.01, helicopter: 0.01 }
+    },
+    mixed: {
+      rateMult: 1.0,
+      weights: { soldier: 0.7, shield: 0.2, tank: 0.07, helicopter: 0.03 }
+    },
+    fake_breather: {
+      rateMult: 0.6,
+      weights: { soldier: 0.6, shield: 0.2, tank: 0.1, helicopter: 0.1 }
+    }
+  } as Record<SpawnPhase, { rateMult: number, weights: Record<string, number> }>
 } as const;
 
 export const GRENADE = {
@@ -209,6 +261,7 @@ export const GRENADE = {
   THROW_VY: 200,
   POOL_CAPACITY: 16,
   EXPLOSION_RADIUS: 32,
+  COOLDOWN: 1.5,
 } as const;
 
 export const EXPLOSION = {
@@ -223,3 +276,4 @@ export const MELEE = {
   /** Short delay before the player can shoot again after a knife swipe. */
   HOLSTER_DELAY: 0.25,
 } as const;
+

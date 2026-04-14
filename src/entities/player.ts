@@ -132,10 +132,16 @@ export class Player {
     if (this._x > maxRight) this._x = maxRight;
 
     // --- Jump (Space) ---
+    const jumpHeld = input.isDown('jump');
     if (this.grounded && input.wasPressed('jump')) {
       this.vy = PLAYER.JUMP_VELOCITY;
       this.grounded = false;
-      this._isCrouching = false; // Breaking crouch on jump
+      this._isCrouching = false;
+    }
+
+    // Variable jump height: if we release space while moving up, cut velocity.
+    if (!this.grounded && !jumpHeld && this.vy > 0) {
+      this.vy *= 0.5; // "Short jump" logic
     }
 
     // --- Gravity ---
@@ -147,6 +153,7 @@ export class Player {
       this.vy = 0;
       this.grounded = true;
     }
+
 
     this.syncMesh();
   }
