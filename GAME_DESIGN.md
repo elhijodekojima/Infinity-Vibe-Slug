@@ -195,7 +195,19 @@ La dificultad reacciona al rendimiento del jugador mediante un **Pressure Score*
 
 ---
 
-## 🎨 Misceláneas
+## 🎨 Gráficos y Animación (Directivas Estéticas)
+
+> *Inspirado en el estándar de la saga original.*
+
+1. **Timing no uniforme:** Para generar impacto visual y sensación de peso, las animaciones no tendrán duraciones constantes por frame. Un salto, ataque o reacción tendrá una *anticipación lenta* y una *ejecución ultrarrápida*. Nuestro parseador de spritesheet debe soportar arrays de duraciones (ms) por frame.
+2. **Reacciones al Daño (Hit Reactions):** Es crítico para el "game feel" que todo enemigo exprese daño visualmente. Se aplicará un ligero **Knockback** físico y un **Hit Flash** (parpadeo blanco/rojo mediante *ShaderMaterial* sobre el InstancedMesh) sin interrumpir la hitbox lógica subyacente.
+3. **Partículas Discretas:** Los VFX (humo, fogonazos, explosiones y escombros) serán gestionados por un Object Pool de partículas. Cada una es un quad independiente con físicas básicas (`vx`, `vy`, gravedad) y ciclo de vida corto, pero animadas puramente con sprite sheets.
+4. **Hitboxes Desacopladas:** La caja de colisión (AABB) está completamente disociada del asset visual. Se ajusta por estado (ej. al agacharse la caja se reduce a la mitad), pero siempre será más pequeña e indulgente que el tamaño en píxeles del PNG para favorecer la jugabilidad.
+5. **Micro-animaciones Vivas:** Los *Idles* no deben ser estáticos, implementaremos respiraciones o *squash & stretch* constantes para emular el "cartoon militar".
+
+---
+
+## 🧩 Misceláneas
 
 ### 🕹️ Modo 2 jugadores (opcional)
 

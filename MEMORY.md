@@ -25,11 +25,11 @@
 **Alternativas consideradas:** PixiJS (demasiado 2D-only, ecosistema menor), Canvas 2D puro (no queremos perder shaders / flexibilidad).
 **Razón:** Three.js con `OrthographicCamera` + `InstancedMesh` + `ShaderMaterial` nos da render 2D performante con capacidad de efectos shader pixel-art, mientras Vite garantiza bundle mínimo y HMR instantáneo.
 
-### AD-002 — Procedural-first para assets
-**Fecha:** 2026-04-12
-**Decisión:** Sprites generados en runtime (canvas 2D offscreen → textura), shaders para parallax/explosiones, SFX sintetizados con Web Audio API.
-**Razón:** Regla "Zero-Loading" de la Jam. Ningún asset externo pesado.
-**Excepción:** Si a mitad del desarrollo hay un cuello de botella de tiempo, se permite un sprite sheet de <20 KB inline como `data:image/png;base64,...` — debe justificarse en `BUILD_LOG.md`.
+### AD-002 — Procedural-first con Sprites 2D Dedicados
+**Fecha:** 2026-04-12 (Actualizado 2026-04-15)
+**Decisión:** **Se permite la carga estática de atlas de sprites 2D en PNG transparentes** para jugador y enemigos, terrenos, obstáculos y fondos.
+**Razón:** Para destacar visualmente en la Jam, el pixel art real ofrece mucho mayor impacto visual y competitividad con un peso mínimo que no compromete excesivamente el bundle (a diferencia de objetos 3D o librerías pesadas).
+**Excepción (Deprecada):** Antes se restringía al 100% de proceduralidad de texto. Ahora la integración de sprite atlas es normativa oficial.
 
 ### AD-003 — Sin framework UI
 **Fecha:** 2026-04-12
@@ -208,8 +208,9 @@ infinity-vibe-slug/
 - ✅ PASO 7: Difficulty Director, Dynamic Drops y Gameplay Polish.
 - ✅ PASO 8: Sistema de Obstáculos Procedurales y Terreno Dinámico.
 - ✅ PASO 9: Combat Context Layer, Helicópteros (Enemigos Aéreos) y Sistema de Pausa.
-- ⏸️ **Pendiente:** Mejoras de Animación/Arte final y Efectos de sonido (Web Audio API).
+- 🚧 **Stand-by (Work in Progress):** Integración de Spritesheets PNG de alta fidelidad para Player (Diego) y entidades (a la espera de arte por parte del usuario).
+- ⏸️ **Pendiente:** Efectos de sonido (Web Audio API) y menús/HUD finales.
 
 ---
 
-**Última actualización:** 2026-04-14
+**Última actualización:** 2026-04-15

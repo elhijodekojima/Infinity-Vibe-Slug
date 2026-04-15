@@ -23,11 +23,13 @@ export class Player {
 
   /** True if the 'down' key is held while grounded. */
   private _isCrouching = false;
-  /**
-   * Current aiming angle in radians.
-   * 0 = Forward, PI/2 = Up, -PI/2 = Down (Air).
-   */
+  /** Current aiming angle in radians. 0 = Forward, PI/2 = Up, -PI/2 = Down (Air). */
   private _aimAngle = 0;
+  
+  /** Timer for idle animation loop */
+  private _idleTime = 0;
+  /** Timer for run animation loop */
+  private _runTime = 0;
 
   /** Reused AABB — updated per-frame, not re-allocated. */
   private readonly _aabb: AABB = {
@@ -41,8 +43,8 @@ export class Player {
     // Sprite quad is larger than the collision box.
     const geom = new PlaneGeometry(PLAYER.SPRITE_W, PLAYER.SPRITE_H);
     const tex = getPlayerTexture();
-    // Sprite-sheet setup: 4 frames (Forward, Up, Crouch, Down)
-    tex.repeat.set(0.25, 1);
+    // Sprite-sheet setup: 17 frames (Run[0..7], Idle[8..13], Up(14), Crouch(15), Down(16))
+    tex.repeat.set(1 / 17, 1);
     const mat = new MeshBasicMaterial({
       map: tex,
       transparent: false,
@@ -125,6 +127,19 @@ export class Player {
     if (input.isDown('right')) vx += speed;
     this._x += vx * dt;
 
+    // Animation Timers
+    if (Math.abs(vx) > 0 && this.grounded && !this._isCrouching && this._aimAngle === 0) {
+      this._runTime += dt;
+      this._idleTime = 0;
+      this.mesh.scale.x = vx < 0 ? -1 : 1;
+    } else if (vx === 0 && this.grounded && !this._isCrouching && this._aimAngle === 0) {
+      this._idleTime += dt;
+      this._runTime = 0;
+    } else {
+      this._idleTime = 0;
+      this._runTime = 0;
+    }
+
     // Clamp to screen horizontally.
     const minX = PLAYER.WIDTH / 2;
     const maxRight = maxX - PLAYER.WIDTH / 2;
@@ -173,15 +188,18 @@ export class Player {
   }
 
   private syncMesh(): void {
-    // Select frame via texture offset: Forward(0), Up(1), Crouch(2), Down(3)
-    let frame = 0;
-    if (this._isCrouching) frame = 2;
-    else if (this._aimAngle > 1.0) frame = 1;
-    else if (this._aimAngle < -1.0) frame = 3;
+    // QUICK POC: Loop the 6 idle frames continuously using a global timer
+    const time = this._idleTime + this._runTime;
+    const IDLE_FPS = 8; // Good cadence for idle
+    const frame = Math.floor(time * IDLE_FPS) % 6;
 
     const map = this.mesh.material instanceof MeshBasicMaterial ? this.mesh.material.map : null;
-    if (map) map.offset.x = frame * 0.25;
+    if (map) map.offset.x = frame * (1 / 6);
 
-    this.mesh.position.set(this._x, this._y + PLAYER.SPRITE_H / 2, 0);
+    this.mesh.position.set(
+      this._x + PLAYER.SPRITE_OFFSET_X, 
+      this._y + (PLAYER.SPRITE_H / 2) + PLAYER.SPRITE_OFFSET_Y, 
+      0
+    );
   }
 }

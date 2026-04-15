@@ -22,10 +22,14 @@ export const PLAYER = {
   WIDTH: 14,
   /** Collision AABB height. */
   HEIGHT: 28,
-  /** Visual sprite width — matches playerSprite.ts PLAYER_SPRITE_W. */
-  SPRITE_W: 20,
-  /** Visual sprite height — matches playerSprite.ts PLAYER_SPRITE_H. */
-  SPRITE_H: 32,
+  /** Visual sprite width. (Reduced from 64 to 34 to match tank size). */
+  SPRITE_W: 34,
+  /** Visual sprite height. */
+  SPRITE_H: 35,
+  /** Visual offset X. */
+  SPRITE_OFFSET_X: 0,
+  /** Visual offset Y. Negative value lowers the sprite to the floor. */
+  SPRITE_OFFSET_Y: -8,
   /** Horizontal move speed in world units / second. */
   MOVE_SPEED: 90,
   /** Speed while crouching (halved). */
