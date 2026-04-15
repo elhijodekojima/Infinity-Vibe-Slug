@@ -1,10 +1,15 @@
 import type { EnemyPool } from '../entities/enemies/enemyPool';
-import { WORLD, ENEMY, TERRAIN_INTENT_WEIGHTS } from '../config/balance';
+import type { HelicopterPool } from '../entities/enemies/helicopterPool';
+import type { TerrainManager } from './terrain/terrainManager';
+import { ENEMY, TERRAIN_INTENT_WEIGHTS } from '../config/balance';
 import { DifficultyDirector } from './difficultyDirector';
 
 /**
- * Refactored SpawnSystem — now driven by the DifficultyDirector.
- * Removed linear interpolation; uses Phase-based weights and multipliers.
+ * Refactored SpawnSystem — driven by the DifficultyDirector.
+ *
+ * Uses phase-based weights (from the director) × terrain-intent modifiers
+ * (from balance.ts) × combat-context modifiers (pressure boost). No linear
+ * interpolation anymore; the distribution is recomputed every spawn tick.
  */
 export class SpawnSystem {
   private timer = 1.5; // Initial delay
@@ -15,10 +20,10 @@ export class SpawnSystem {
     private readonly soldiers: EnemyPool,
     private readonly shields: EnemyPool,
     private readonly tanks: EnemyPool,
-    private readonly helicopters: any,
+    private readonly helicopters: HelicopterPool,
   ) {}
 
-  update(dt: number, cameraRight: number, terrain: any): void {
+  update(dt: number, cameraRight: number, terrain: TerrainManager): void {
     this.elapsed += dt;
     this.timer -= dt;
 
@@ -33,11 +38,11 @@ export class SpawnSystem {
     this.elapsed = 0;
   }
 
-  private currentInterval(terrain: any): number {
+  private currentInterval(terrain: TerrainManager): number {
     let baseRate = Math.min(4, 0.4 * Math.exp(this.elapsed * 0.01));
-    
-    // Swarm obstacle: reduce enemy count to focus on traversal ( parkour )
-    // We check if many platforms are active as a proxy for "swarm"
+
+    // Swarm obstacle: reduce enemy count to focus on traversal (parkour).
+    // We check if many platforms are active as a proxy for "swarm".
     if (terrain.platforms.length > 5) {
       baseRate *= 0.5;
     }
@@ -46,20 +51,20 @@ export class SpawnSystem {
     return 1 / Math.max(0.01, finalRate);
   }
 
-  private spawnOne(cameraRight: number, terrain: any): void {
+  private spawnOne(cameraRight: number, terrain: TerrainManager): void {
     const context = this.director.context;
     const baseWeights = { ...this.director.currentPhaseWeights };
     const intentMod = TERRAIN_INTENT_WEIGHTS[context.terrainIntent] || {};
-    
-    // Dynamic CombatContext Scaling
+
+    // Dynamic CombatContext scaling.
     const weights = {
       soldier: baseWeights.soldier * (intentMod.soldier || 1) * (context.pressure > 0.8 ? 1.2 : 1),
       shield: baseWeights.shield * (intentMod.shield || 1),
       tank: baseWeights.tank * (intentMod.tank || 1),
-      helicopter: baseWeights.helicopter * (intentMod.helicopter || 1)
+      helicopter: baseWeights.helicopter * (intentMod.helicopter || 1),
     };
 
-    let pool: EnemyPool | any;
+    let pool: EnemyPool | HelicopterPool;
     let type: 'ground' | 'air' = 'ground';
     let specificZoneType: 'ground' | 'elevated' | 'any' = 'any';
 
@@ -80,27 +85,27 @@ export class SpawnSystem {
     }
 
     const spawnX = cameraRight + pool.config.width;
-    
+
     if (type === 'ground') {
       const zones = terrain.getSpawnZones(cameraRight);
       let targetZones = zones.ground;
 
       if (specificZoneType === 'elevated' && zones.elevated.length > 0) {
-         targetZones = zones.elevated;
+        targetZones = zones.elevated;
       } else if (specificZoneType === 'any' && zones.elevated.length > 0 && Math.random() < 0.3) {
-         targetZones = zones.elevated;
+        targetZones = zones.elevated;
       }
 
       if (targetZones.length === 0) targetZones = zones.ground; // fallback
-      
-      const zone = targetZones[Math.floor(Math.random() * targetZones.length)];
-      
+
+      const zone = targetZones[Math.floor(Math.random() * targetZones.length)]!;
+
       let finalSpawnX = spawnX;
       if (zone.type === 'elevated') {
-        // Center on platform roughly
+        // Center on platform roughly.
         finalSpawnX = Math.max(cameraRight, zone.x - 20 + Math.random() * 40);
       } else if (zone.x > cameraRight) {
-         finalSpawnX = zone.x + Math.random() * 50;
+        finalSpawnX = zone.x + Math.random() * 50;
       }
 
       const spawnY = terrain.getSurfaceHeight(finalSpawnX, 300, -100);
@@ -109,9 +114,4 @@ export class SpawnSystem {
       pool.spawn(spawnX, ENEMY.HELICOPTER.FLY_HEIGHT);
     }
   }
-}
-
-
-function lerp(a: number, b: number, t: number): number {
-  return a + (b - a) * t;
 }

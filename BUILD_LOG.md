@@ -475,3 +475,164 @@
 
 #### ➡️ Siguiente paso
 - Implementación final de la mecánica de "Heli-2" (vuelo inteligente) y SFX.
+
+---
+
+### [2026-04-15] — Player sprite integration + PNG optimization pipeline
+
+**Estado general:** 🟢 verde
+**Bundle size actual:** ≈ 58 KB JS (gzip) + 68 KB PNG (player_idle)
+**Tiempo a primer paint:** < 100 ms (menú HTML inline); sprite se carga en paralelo
+**`tsc --noEmit`:** ✅ limpio
+
+#### ✅ Hecho
+
+**Sprite loader API (`src/gfx/playerSprite.ts` rewrite)**
+
+- Nuevas constantes exportadas:
+  - `PLAYER_IDLE_FRAMES = 6` — número de frames en la sheet (strip horizontal).
+  - `PLAYER_IDLE_FPS = 8` — cadencia de animación idle.
+- Función `preloadPlayerSprite(): Promise<Texture>` que resuelve cuando el PNG está decodificado y subido a GPU. Misma instancia de `Texture` que `getPlayerTexture()` (sync), así que un solo upload.
+- `configureTexture()` centraliza: `NearestFilter` (min+mag), `generateMipmaps: false`, `SRGBColorSpace`, `repeat.x = 1/PLAYER_IDLE_FRAMES`.
+- **Single-request guard**: `ensureLoading()` evita doble-fetch si `getPlayerTexture()` y `preloadPlayerSprite()` se llaman en orden distinto.
+
+**Bug fix en `src/entities/player.ts`**
+
+- Eliminadas las líneas `tex.repeat.set(1/17, 1)` y el comentario del sheet consolidado de 17 frames que era un plan futuro, NO el PNG actual. El constructor hacía que el `repeat.x` fuese `1/17` mientras `syncMesh` hacía offsets de `1/6` → **los frames se recortaban mal**.
+- `syncMesh()` ahora usa `PLAYER_IDLE_FRAMES` y `PLAYER_IDLE_FPS` importados, no magic numbers.
+- **Mesh invisible hasta PNG decodificado**: constructor setea `mesh.visible = false` y `preloadPlayerSprite().then(() => mesh.visible = true)`. Fail-open si el fetch da 404 (log + mostrar igual).
+
+**PNG pipeline de optimización**
+
+- `pngquant-bin` añadido como devDependency (binario cross-platform bundled).
+- `scripts/optimize-sprites.mjs` — batch optimizer idempotente:
+  - Recorre `public/assets/sprites/**/*.png` recursivamente.
+  - Aplica `pngquant --quality 65-80 --force --skip-if-larger --strip`.
+  - Maneja exit codes 98/99 (ya optimizado) como "skip, no failure".
+  - Reporta before/after por archivo y total.
+- `npm run optimize:sprites` en `package.json`.
+
+**Resultado medido en `player_idle.png`:**
+
+| | Antes | Después | Reducción |
+|---|---|---|---|
+| Tamaño | **231,848 B** | **67,508 B** | **-70.9%** |
+| Profundidad | RGBA 8-bit (4 canales) | 8-bit colormap (paleta) | palette-indexed |
+| Dimensiones | 1180 × 194 | 1180 × 194 | sin cambio |
+
+**`public/assets/README.md` nuevo** — documenta:
+- Layout de carpetas (`sprites/{player,enemies,items,ui}/`).
+- Reglas de autoría (strips horizontales, frame count en código no en filename).
+- Comando de optimización (`npm run optimize:sprites`).
+- Presupuesto 300 KB total para la Jam.
+
+#### 🧠 Decisiones
+
+- **AD-036 — Sprite assets en `public/` (no `src/assets/`).** Paths estables (`/assets/...`) sin hashing ni procesamiento bundler; evita import statements en cada módulo de loader. Trade-off: no inlining automático como data-URI. Los sprites son >4 KB de todas formas; el bundler no los inlinearía.
+- **AD-037 — UV config en el módulo del sprite, NO en el consumidor.** El bug del `1/17` nació porque el consumidor (Player) reconfiguraba `tex.repeat`. Regla nueva: solo `playerSprite.ts` toca `repeat`/`offset.initial`/`filter`. El consumidor solo lee `map.offset.x = frame / PLAYER_IDLE_FRAMES`.
+- **AD-038 — Preload con fail-open.** Si el PNG falla (red caída, 404), el juego sigue jugable (mesh visible sin textura) en vez de congelarse. Log de error para diagnóstico pero sin crash.
+- **AD-039 — Optimización PNG como paso de build, no runtime.** pngquant corre en la máquina del autor antes del commit. El bundle servido a usuarios ya es pequeño. Cero overhead en la carga del juego.
+
+#### 🐞 Problemas / Bloqueos
+
+- **Desalineación en la documentación.** Las entradas entre 2026-04-13 y 2026-04-14 se añadieron directamente en el BUILD_LOG por la otra sesión, pero varias decisiones (DifficultyDirector, terrain, helicopter, weapon interface, aim angle) NO tienen su reflejo en `MEMORY.md` ni en `PROMPTS.md`. Se documentarán en el próximo pase de consolidación.
+- Ningún bloqueante activo. Typecheck limpio.
+
+#### ➡️ Siguiente paso
+
+- Validación in-game por el usuario: confirmar que el personaje anima correctamente (6 frames idle cycled a 8 FPS).
+- Añadir las siguientes animaciones del player usando el mismo pipeline:
+  - `player_run.png` (N frames de carrera)
+  - `player_shoot.png` / `player_aim_up.png` (diferentes poses de disparo)
+  - `player_crouch.png` (1-2 frames)
+  - `player_jump.png` (1 frame en el aire)
+- Por cada sheet nueva: drop en `public/assets/sprites/player/`, añadir constante + getter en `playerSprite.ts`, y `Player` selecciona la textura según su estado de animación.
+
+---
+
+### [2026-04-15] — Cleanup session: tipado, registry de animaciones, colisiones y docs
+
+**Estado general:** 🟢 verde
+**`tsc --noEmit`:** ✅ limpio
+**Objetivo:** Dejar el código preparado para añadir las animaciones restantes sin fricción, cerrar la brecha de tipado y consolidar la documentación.
+**Sin cambios de comportamiento:** todas las refactors son isomorfas (el juego se ve y juega igual).
+
+#### ✅ Hecho — 4 fases
+
+**Fase 1 — Eliminar `any` en fronteras de módulo (cero riesgo)**
+- `src/entities/player.ts:109` — `terrain: any` → `TerrainManager`.
+- `src/entities/enemies/enemyPool.ts:147` — `terrain: any` → `TerrainManager`, firma reformateada en multi-línea.
+- `src/systems/spawnSystem.ts` — 6 `any` eliminados: `helicopters: any` → `HelicopterPool`, 3× `terrain: any` → `TerrainManager`, variante tipada `EnemyPool | HelicopterPool` para la `pool` local. Imports `import type` para evitar runtime dependency cycles. Eliminada función `lerp()` dead code.
+- Resultado: autocompletado funcional en IDE, typecheck detecta ahora renombrados en `TerrainManager` / `HelicopterPool`.
+
+**Fase 2 — Registry de animaciones del Player (prep para run/shoot/crouch/jump)**
+- `src/gfx/playerSprite.ts` reescrito alrededor de un `Record<PlayerAnim, AnimDef>` inmutable:
+  - Tipo `PlayerAnim = 'idle' | 'run' | 'shoot' | 'jump' | 'crouch' | 'aimUp'`.
+  - `DEFS` con metadata por animación: `url`, `frames`, `fps`, `loop`.
+  - `getAnimation(name)` síncrono con **fallback cascada**: animación pedida → idle → textura vacía (mesh invisible vía gate de preload).
+  - `preloadAllAnimations()` hace `Promise.all` de todas las animaciones; las que fallan (404, PNG no existe todavía) **se resuelven igualmente** (fail-open) con `console.warn`, nunca rechazan la Promise.
+  - Exports deprecated (`PLAYER_IDLE_FRAMES`, `PLAYER_IDLE_FPS`, `getPlayerTexture`, `preloadPlayerSprite`) mantenidos para backward-compat con cualquier caller antiguo.
+- `src/entities/player.ts` reescrito con state machine de animación:
+  - Fields antes: `_idleTime`, `_runTime` (dos timers). Ahora: `_currentAnim: PlayerAnim`, `_animTime: number`, `_shootAnimTimer: number`.
+  - Nuevo `selectAnim(vx)` decide el estado cada frame con prioridad **shoot > jump > crouch > aimUp > run > idle**.
+  - Nuevo método público `triggerShootAnim(durationSec)` — main.ts lo invocará cuando dispare una arma, fuerza el estado 'shoot' durante N segundos.
+  - `syncMesh()` ahora hace swap de `material.map` cuando la animación cambia; respeta `loop: false` para shoot/jump (clamp en último frame).
+  - `reset()` reinicia también el animation state (bug menor anterior: los timers sobrevivían a Retry).
+- **Impacto**: añadir una animación nueva = 1 entrada en `DEFS` + 1 PNG + 1 caso en `selectAnim()`. Cero duplicación de loaders.
+
+**Fase 3 — Extraer helpers de colisión (desduplicación)**
+- 5 funciones nuevas en `src/main.ts`:
+  - `bulletVsGroundPool(b, bi, pool)` — chequeo de bala vs un pool de suelo, incluyendo regla del escudo (bullets top/bottom penetran) y anti-multihit por `shotId`.
+  - `bulletVsHelicopters(b, bi)` — chequeo de bala vs helicópteros con anti-multihit.
+  - `rocketVsGroundPool(pool)` — detección de overlap rocket-suelo (sin daño aquí; se delega a `detonateRocket`).
+  - `rocketVsHelicopters()` — análogo para helicópteros.
+  - `detonateRocket(r, ri)` — atómico: kill + spawn explosion + `applyExplosionDamage`.
+- `resolveBulletEnemyHits()` pasa de 90 líneas con dos loops `bulletLoop:` duplicados a 20 líneas orquestadoras: un solo loop de balas, llamadas a helpers, `consumed` flag para cortar.
+- `resolveRocketEnemyHits()` misma reestructuración, de 50 a 15 líneas.
+- Nuevas AABBs reutilizables: `heliBox`, `enemyBulletBox` — eliminan 3 allocations inline por frame (`{ x, y, w, h }` per-iteración en `resolvePlayerEnemyHits` + `resolveEnemyBulletPlayerHits`).
+- `import { type RocketData }` añadido explícitamente (antes los rockets compartían shape por duck-typing).
+- Net LOC en `main.ts`: +29 líneas (los helpers añaden líneas que los inlines eliminados quitan), pero la **estructura lógica** gana enormemente. Añadir un 5º tipo de arma o enemigo = 1 helper nuevo, no 50 líneas de copy-paste.
+
+**Fase 4 — Documentación consolidada**
+- `MEMORY.md`:
+  - Nuevas ADs documentadas: **AD-037** (sprites en `public/`), **AD-038** (UV config solo en módulo sprite — bug-fix de `1/17` vs `1/6`), **AD-039** (preload fail-open), **AD-040** (registry de animaciones), **AD-041** (optimización PNG como build-step), **AD-042** (cero `any` en fronteras de módulo).
+  - File tree reescrito reflejando el estado **real** del repo al 2026-04-15 (la versión anterior era el plan original con archivos que nunca existieron como `shaders/*.glsl`, `dropSystem.ts`, `soldier.ts`/`shieldSoldier.ts`/`tank.ts` separados).
+  - Sección nueva **"Cómo añadir una nueva animación del player"** con el flujo de 3 pasos (drop PNG → entry en `DEFS` → case en `selectAnim()`).
+  - Checklist de estado actual extendido con PASO 10 (primera animación integrada) y PASO 11 (esta limpieza).
+- `PROMPTS.md`: entrada P07 (esta sesión).
+- `BUILD_LOG.md`: esta entrada.
+
+#### 🧠 Decisiones
+
+- **AD-040 — Registry de animaciones del player.** Un `Record<PlayerAnim, AnimDef>` + map runtime de `Texture`. Rationale: reusabilidad con cero duplicación, fallback automático durante producción de arte, preload paralelo sin código bespoke por animación.
+- **AD-042 — Cero `any` en fronteras de módulo.** `import type { TerrainManager }` siempre que sea posible (evita ciclos de módulo). Los `any` internos a un módulo podrían quedarse si son inocuos, pero cruzar una frontera requiere tipo formal.
+- **AD-043 — Helpers de colisión con efectos laterales documentados.** `bulletVsGroundPool()` comunica via return value (`boolean consumed`) + mutación directa de `state.score` y de `pool.data[si]`. Pattern aceptable aquí porque el caller (`resolveBulletEnemyHits`) es el único consumer; exponer como módulo separado requeriría pasar `state` explícitamente. Cuando main.ts se divida en múltiples archivos, este contrato se formalizará.
+
+#### 🐞 Problemas / Bloqueos
+
+- Bug al inicio de Fase 3: las helper functions asumían `BulletData` pero los rockets usan `RocketData`. TS lo atrapó inmediatamente (`TS2345: RocketData missing shotId, damage, penetrates, dist, range`). Fix: import `type RocketData` y helpers específicos para rockets que no leen esos fields.
+- Warning CRLF/LF en varios archivos al guardar — Windows default; `.gitattributes` podría unificarlo pero no es prioritario.
+
+#### 📏 Métricas
+
+| Archivo | Cambios netos |
+|---|---|
+| `src/main.ts` | +283 / −254 (refactor + helpers; +29 net LOC, mayor legibilidad) |
+| `src/entities/player.ts` | +160 / −0 (rewrite con state machine) |
+| `src/gfx/playerSprite.ts` | +171 / −0 (rewrite con registry) |
+| `src/systems/spawnSystem.ts` | +54 / −0 (rewrite con tipos formales) |
+| `src/entities/enemies/enemyPool.ts` | +9 / −0 (firma multi-línea + import type) |
+| `MEMORY.md` | +185 líneas (6 ADs + file tree + guía de animaciones) |
+| `BUILD_LOG.md` | +74 líneas (esta entrada) |
+
+#### ➡️ Siguiente paso
+
+- **Añadir animaciones restantes del player** una a una. El workflow por animación:
+  1. Dibujar sheet horizontal (N frames, píxeles uniformes).
+  2. Guardar en `public/assets/sprites/player/player_<nombre>.png`.
+  3. `npm run optimize:sprites` para comprimir.
+  4. Ajustar `DEFS.<nombre>` en `playerSprite.ts` si el frame count real difiere de la estimación.
+  5. Si es `'shoot'`, wire `player.triggerShootAnim(duration)` en `main.ts` cuando el arma dispare.
+- Orden sugerido: **run** (visible siempre que te muevas) → **jump** (el más simple, 1 frame) → **shoot** (con wiring) → **crouch** (corto loop) → **aimUp** (1 frame pose).
+
+---

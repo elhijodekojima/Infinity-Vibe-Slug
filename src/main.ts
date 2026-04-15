@@ -22,7 +22,7 @@ import { Input } from './core/input';
 import { loadHighScore, saveHighScore } from './core/persistence';
 import { Background } from './gfx/background';
 import { Player } from './entities/player';
-import { BulletPool } from './entities/bullets';
+import { BulletPool, type BulletData } from './entities/bullets';
 import { EnemyPool, type EnemyConfig } from './entities/enemies/enemyPool';
 import { GrenadePool } from './entities/grenades';
 import { ExplosionPool } from './entities/explosions';
@@ -31,7 +31,7 @@ import { Machinegun } from './entities/weapons/machinegun';
 import { Shotgun } from './entities/weapons/shotgun';
 import { RocketLauncher } from './entities/weapons/rocketLauncher';
 import type { Weapon } from './entities/weapons/weapon';
-import { RocketPool } from './entities/rockets';
+import { RocketPool, type RocketData } from './entities/rockets';
 import { ItemPool, type ItemType } from './entities/items/itemPool';
 import { HelicopterPool } from './entities/enemies/helicopterPool';
 import { EnemyBulletPool } from './entities/bullets';
@@ -226,7 +226,10 @@ const state = {
 
 const AOE_R2 = GRENADE.EXPLOSION_RADIUS * GRENADE.EXPLOSION_RADIUS;
 
-/** Reusable AABBs — avoid per-frame allocation in collision loops. */
+/**
+ * Reusable AABBs — avoid per-frame allocation in collision loops.
+ * Every collision pass mutates these before each `aabbOverlap()` call.
+ */
 const enemyBox: AABB = { x: 0, y: 0, w: 0, h: 0 };
 const bulletBox: AABB = {
   x: 0,
@@ -234,7 +237,14 @@ const bulletBox: AABB = {
   w: BULLET.PLAYER.WIDTH,
   h: BULLET.PLAYER.HEIGHT,
 };
-
+const heliBox: AABB = {
+  x: 0,
+  y: 0,
+  w: ENEMY.HELICOPTER.WIDTH,
+  h: ENEMY.HELICOPTER.HEIGHT,
+};
+/** For enemy projectiles — width/height vary per type (bullet/bomb/cannonball). */
+const enemyBulletBox: AABB = { x: 0, y: 0, w: 0, h: 0 };
 const meleeBox: AABB = { x: 0, y: 0, w: 0, h: 0 };
 let meleeCooldown = 0;
 
@@ -406,13 +416,91 @@ initGameOver({ onRetry: () => startGame(state.username) });
 // When a bullet hits a shield the bullet is still consumed (visual "ping"
 // off the shield) but no damage or score is applied.
 
+/**
+ * Scan one ground-enemy pool for a hit from bullet `b`.
+ * Applies damage, score, shield rule, and consumes non-penetrating bullets.
+ * Returns true iff the bullet was consumed this call (non-penetrating hit).
+ * `bulletBox` must already be populated by the caller.
+ */
+function bulletVsGroundPool(b: BulletData, bi: number, pool: EnemyPool): boolean {
+  const sData = pool.data;
+  const halfH = pool.config.height / 2;
+  enemyBox.w = pool.config.width;
+  enemyBox.h = pool.config.height;
+  for (let si = 0; si < sData.length; si++) {
+    const s = sData[si]!;
+    if (!s.active || !b.active) continue;
+
+    // Skip enemies that haven't entered the screen yet.
+    if (s.x > renderer.camera.right || s.x < -pool.config.width) continue;
+
+    // Anti-multihit: each shot (trigger pull) only damages an enemy once.
+    if (s.lastShotIdHit === b.shotId) continue;
+
+    enemyBox.x = s.x;
+    enemyBox.y = s.y + halfH;
+    if (isNaN(enemyBox.x) || isNaN(enemyBox.y)) continue;
+
+    if (!aabbOverlap(bulletBox, enemyBox)) continue;
+
+    s.lastShotIdHit = b.shotId;
+
+    // Shield rule: frontal bullets blocked, but top/bottom pixels pass through.
+    const isFromAbove = b.y > s.y + pool.config.height - 4;
+    const isFromBelow = b.y < s.y + 4;
+    const canDamage =
+      b.penetrates || !pool.config.blocksFrontalBullets || isFromAbove || isFromBelow;
+    if (canDamage && pool.damageAt(si, b.damage)) {
+      state.score += pool.config.score;
+      handleEnemyDeath(s.x, s.y);
+    }
+
+    // Non-penetrating bullets die on ANY impact (even blocked shields).
+    if (!b.penetrates) {
+      bullets.killAt(bi);
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Scan all active helicopters for a hit from bullet `b`.
+ * Returns true iff the bullet was consumed this call.
+ * `bulletBox` must already be populated by the caller.
+ */
+function bulletVsHelicopters(b: BulletData, bi: number): boolean {
+  const hData = helicopters.data;
+  for (let hi = 0; hi < hData.length; hi++) {
+    const h = hData[hi]!;
+    if (!h.active || !b.active) continue;
+    if (h.x > renderer.camera.right || h.x < -ENEMY.HELICOPTER.WIDTH) continue;
+    if (h.lastShotIdHit === b.shotId) continue;
+
+    heliBox.x = h.x;
+    heliBox.y = h.y;
+    if (!aabbOverlap(bulletBox, heliBox)) continue;
+
+    h.lastShotIdHit = b.shotId;
+    if (helicopters.damageAt(hi, b.damage)) {
+      state.score += ENEMY.HELICOPTER.SCORE;
+      handleEnemyDeath(h.x, h.y, true);
+    }
+    if (!b.penetrates) {
+      bullets.killAt(bi);
+      return true;
+    }
+  }
+  return false;
+}
+
 function resolveBulletEnemyHits(): void {
   const bData = bullets.data;
-    bulletLoop: for (let bi = 0; bi < bData.length; bi++) {
+  for (let bi = 0; bi < bData.length; bi++) {
     const b = bData[bi]!;
     if (!b.active) continue;
-    
-    // Safety: ensure we don't pass NaN to collision checks
+
+    // Safety: drop NaN-positioned bullets rather than letting them poison AABB math.
     if (isNaN(b.x) || isNaN(b.y)) {
       bullets.killAt(bi);
       continue;
@@ -421,146 +509,84 @@ function resolveBulletEnemyHits(): void {
     bulletBox.x = b.x;
     bulletBox.y = b.y;
 
+    // Ground pools first; if the bullet is consumed there, skip helicopters.
+    let consumed = false;
     for (const pool of enemyPools) {
-      enemyBox.w = pool.config.width;
-      enemyBox.h = pool.config.height;
-      const sData = pool.data;
-      const halfH = pool.config.height / 2;
-      for (let si = 0; si < sData.length; si++) {
-        const s = sData[si]!;
-        if (!s.active || !b.active) continue;
-
-        // Skip enemies that haven't entered the screen yet
-        if (s.x > renderer.camera.right || s.x < -pool.config.width) continue;
-
-        // Anti-multihit: each shot (trigger pull) only damages an enemy once.
-        if (s.lastShotIdHit === b.shotId) continue;
-
-        enemyBox.x = s.x;
-        enemyBox.y = s.y + halfH;
-        
-        if (isNaN(enemyBox.x) || isNaN(enemyBox.y)) continue;
-
-        if (aabbOverlap(bulletBox, enemyBox)) {
-          // Record the hit to prevent double-dipping from this shot.
-          s.lastShotIdHit = b.shotId;
-
-          // Normal bullets only damage if the enemy isn't blocking (shield).
-          // Special rule: Shield is vulnerable ONLY at the very top or very bottom lines.
-          const isFromAbove = b.y > s.y + pool.config.height - 4;
-          const isFromBelow = b.y < s.y + 4;
-          const canDamage = b.penetrates || !pool.config.blocksFrontalBullets || isFromAbove || isFromBelow;
-          
-          if (canDamage) {
-            if (pool.damageAt(si, b.damage)) {
-              state.score += pool.config.score;
-              handleEnemyDeath(s.x, s.y);
-            }
-          }
-
-          // Non-penetrating bullets (pistol/mg) always die on hit.
-          // Shields also stop everything EXCEPT penetrating bullets.
-          if (!b.penetrates) {
-            bullets.killAt(bi);
-            continue bulletLoop;
-          }
-        }
-      }
+      if (bulletVsGroundPool(b, bi, pool)) { consumed = true; break; }
     }
+    if (!consumed) bulletVsHelicopters(b, bi);
   }
+}
 
-  // --- Helicopter hits (with anti-multihit protection) ---
+/**
+ * Detonate rocket `r` at its current position: kill the projectile, spawn
+ * the explosion VFX, and apply AoE damage (which handles scoring).
+ */
+function detonateRocket(r: RocketData, ri: number): void {
+  rockets.killAt(ri);
+  explosions.spawn(r.x, r.y, GRENADE.EXPLOSION_RADIUS);
+  applyExplosionDamage(r.x, r.y);
+}
+
+/** True iff the current `bulletBox` (populated with rocket coords) overlaps any active ground enemy. */
+function rocketVsGroundPool(pool: EnemyPool): boolean {
+  const sData = pool.data;
+  const halfH = pool.config.height / 2;
+  enemyBox.w = pool.config.width;
+  enemyBox.h = pool.config.height;
+  for (let si = 0; si < sData.length; si++) {
+    const s = sData[si]!;
+    if (!s.active) continue;
+    if (s.x > renderer.camera.right || s.x < -pool.config.width) continue;
+    enemyBox.x = s.x;
+    enemyBox.y = s.y + halfH;
+    if (aabbOverlap(bulletBox, enemyBox)) return true;
+  }
+  return false;
+}
+
+/** True iff rocket `r` overlaps any active helicopter. */
+function rocketVsHelicopters(): boolean {
   const hData = helicopters.data;
-  bulletLoop: for (let bi = 0; bi < bullets.data.length; bi++) {
-    const b = bullets.data[bi]!;
-    if (!b.active) continue;
-    bulletBox.x = b.x;
-    bulletBox.y = b.y;
-    for (let hi = 0; hi < hData.length; hi++) {
-      const h = hData[hi]!;
-      if (!h.active) continue;
-      // Skip off-screen helicopters
-      if (h.x > renderer.camera.right || h.x < -ENEMY.HELICOPTER.WIDTH) continue;
-      // Anti-multihit: shotgun pellets from the same trigger pull only damage once
-      if (h.lastShotIdHit === b.shotId) continue;
-      const hBox = { x: h.x, y: h.y, w: ENEMY.HELICOPTER.WIDTH, h: ENEMY.HELICOPTER.HEIGHT };
-      if (aabbOverlap(bulletBox, hBox)) {
-        h.lastShotIdHit = b.shotId;
-        if (helicopters.damageAt(hi, b.damage)) {
-          state.score += ENEMY.HELICOPTER.SCORE;
-          handleEnemyDeath(h.x, h.y, true);
-        }
-        if (!b.penetrates) {
-          bullets.killAt(bi);
-          continue bulletLoop;
-        }
-      }
-    }
+  for (let hi = 0; hi < hData.length; hi++) {
+    const h = hData[hi]!;
+    if (!h.active) continue;
+    if (h.x > renderer.camera.right || h.x < -ENEMY.HELICOPTER.WIDTH) continue;
+    heliBox.x = h.x;
+    heliBox.y = h.y;
+    if (aabbOverlap(bulletBox, heliBox)) return true;
   }
+  return false;
 }
 
 function resolveRocketEnemyHits(): void {
   const rData = rockets.data;
-  rocketLoop: for (let ri = 0; ri < rData.length; ri++) {
+  for (let ri = 0; ri < rData.length; ri++) {
     const r = rData[ri]!;
     if (!r.active) continue;
+
     bulletBox.x = r.x;
     bulletBox.y = r.y;
 
+    // Rockets explode on ANY overlap; AoE damage is applied in `detonateRocket`.
+    let hit = false;
     for (const pool of enemyPools) {
-      enemyBox.w = pool.config.width;
-      enemyBox.h = pool.config.height;
-      const sData = pool.data;
-      const halfH = pool.config.height / 2;
-      for (let si = 0; si < sData.length; si++) {
-        const s = sData[si]!;
-        if (!s.active) continue;
-        // Skip enemies off-screen (can't melee or be meleed off-screen)
-        if (s.x > renderer.camera.right || s.x < -pool.config.width) continue;
-        enemyBox.x = s.x;
-        enemyBox.y = s.y + halfH;
-        if (aabbOverlap(bulletBox, enemyBox)) {
-          // Rockets explode on ANY hit.
-          rockets.killAt(ri);
-          explosions.spawn(r.x, r.y, GRENADE.EXPLOSION_RADIUS);
-          applyExplosionDamage(r.x, r.y);
-        continue rocketLoop; // Process next rocket instead of returning
-        }
-      }
+      if (rocketVsGroundPool(pool)) { hit = true; break; }
     }
-  }
-
-  // --- Rocket vs Helicopter ---
-  rocketLoop: for (let ri = 0; ri < rData.length; ri++) {
-    const r = rData[ri]!;
-    if (!r.active) continue;
-    bulletBox.x = r.x;
-    bulletBox.y = r.y;
-    for (let hi = 0; hi < helicopters.data.length; hi++) {
-      const h = helicopters.data[hi]!;
-      if (!h.active) continue;
-      // Skip off-screen helicopters
-      if (h.x > renderer.camera.right || h.x < -ENEMY.HELICOPTER.WIDTH) continue;
-      const hBox = { x: h.x, y: h.y, w: ENEMY.HELICOPTER.WIDTH, h: ENEMY.HELICOPTER.HEIGHT };
-      if (aabbOverlap(bulletBox, hBox)) {
-        rockets.killAt(ri);
-        explosions.spawn(r.x, r.y, GRENADE.EXPLOSION_RADIUS);
-        // applyExplosionDamage handles helicopter damage (same path as tanks)
-        applyExplosionDamage(r.x, r.y);
-        continue rocketLoop;
-      }
-    }
+    if (!hit) hit = rocketVsHelicopters();
+    if (hit) detonateRocket(r, ri);
   }
 }
 
 function resolvePlayerEnemyHits(): boolean {
   const pBox = player.aabb;
-  
-  // Helicopter contact = instant death
+
+  // Helicopter contact = instant death.
   for (const h of helicopters.data) {
     if (!h.active) continue;
-    const hBox = { x: h.x, y: h.y, w: ENEMY.HELICOPTER.WIDTH, h: ENEMY.HELICOPTER.HEIGHT };
-    if (aabbOverlap(pBox, hBox)) return true;
+    heliBox.x = h.x;
+    heliBox.y = h.y;
+    if (aabbOverlap(pBox, heliBox)) return true;
   }
 
   for (const pool of enemyPools) {
@@ -639,13 +665,16 @@ function resolveEnemyBulletPlayerHits(): void {
     const b = enemyBullets.data[i]!;
     if (!b.active) continue;
     
-    // Scale bullet hitbox based on type
+    // Scale hitbox based on projectile type (bullet / bomb / cannonball).
     let s: number = BULLET.ENEMY.WIDTH;
     if (b.type === 'bomb') s = ENEMY.BOMB.SIZE;
     else if (b.type === 'cannonball') s = ENEMY.CANNONBALL.SIZE;
-    
-    const bBox = { x: b.x, y: b.y, w: s, h: s };
-    if (aabbOverlap(pBox, bBox)) {
+
+    enemyBulletBox.x = b.x;
+    enemyBulletBox.y = b.y;
+    enemyBulletBox.w = s;
+    enemyBulletBox.h = s;
+    if (aabbOverlap(pBox, enemyBulletBox)) {
       if (b.type === 'bomb') {
         // Bomb triggers explosion on player contact + INSTANT DEATH
         enemyBullets.killAt(i);

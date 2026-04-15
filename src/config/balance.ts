@@ -26,10 +26,16 @@ export const PLAYER = {
   SPRITE_W: 34,
   /** Visual sprite height. */
   SPRITE_H: 35,
-  /** Visual offset X. */
+  /** Visual offset X. Shifts the sprite quad horizontally from the feet. */
   SPRITE_OFFSET_X: 0,
-  /** Visual offset Y. Negative value lowers the sprite to the floor. */
-  SPRITE_OFFSET_Y: -8,
+  /**
+   * Visual offset Y. 0 aligns mesh.bottom with feet (ground). Use positive
+   * values to lift the sprite (useful if the sheet has bottom padding),
+   * negative values to sink it below ground line. With the current
+   * 1180×194 idle sheet the feet touch the bottom of each frame, so 0 is
+   * correct — any negative value sinks the character into the floor.
+   */
+  SPRITE_OFFSET_Y: 0,
   /** Horizontal move speed in world units / second. */
   MOVE_SPEED: 90,
   /** Speed while crouching (halved). */

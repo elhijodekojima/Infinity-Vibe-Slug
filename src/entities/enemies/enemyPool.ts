@@ -6,6 +6,7 @@ import {
   Texture,
 } from 'three';
 import { PLAYER, OBSTACLE } from '../../config/balance';
+import type { TerrainManager } from '../../systems/terrain/terrainManager';
 
 /**
  * Immutable configuration of a concrete enemy type.
@@ -144,7 +145,13 @@ export class EnemyPool {
     return false;
   }
 
-  update(dt: number, scrollSpeed: number, terrain: any, playerY: number, spawnProjectile?: (x: number, y: number) => void): void {
+  update(
+    dt: number,
+    scrollSpeed: number,
+    terrain: TerrainManager,
+    playerY: number,
+    spawnProjectile?: (x: number, y: number) => void,
+  ): void {
     const { speed, hesitateChance, width, poolCapacity, label } = this.config;
     const activeCount = this.activeCount;
 

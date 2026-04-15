@@ -33,6 +33,50 @@
 
 ---
 
+### [2026-04-15] — P07 · Cleanup session: type safety, animation registry, collision helpers, docs
+**Objetivo:** Limpiar el código sin cambiar comportamiento antes de continuar añadiendo animaciones. 4 fases ejecutadas en orden: (1) eliminar `any` en fronteras de módulo, (2) registry de animaciones extensible en `playerSprite.ts` + state machine en `player.ts`, (3) extraer helpers de colisión en `main.ts` para deduplicar las 4 variantes (bullet/rocket × ground/helicopter), (4) consolidación documental.
+**Modelo:** Claude Opus 4.6 (1M context)
+**Archivo(s) afectado(s):**
+- Types (Fase 1): `src/entities/player.ts`, `src/entities/enemies/enemyPool.ts`, `src/systems/spawnSystem.ts` (rewrite limpio con tipos formales + eliminación de `lerp` dead code).
+- Animation registry (Fase 2): `src/gfx/playerSprite.ts` (rewrite completo con `PlayerAnim` union + `DEFS` record + fallback cascada), `src/entities/player.ts` (state machine `selectAnim()` + `triggerShootAnim()` hook).
+- Collision helpers (Fase 3): `src/main.ts` (5 funciones nuevas extraídas: `bulletVsGroundPool`, `bulletVsHelicopters`, `rocketVsGroundPool`, `rocketVsHelicopters`, `detonateRocket`; 2 AABBs reutilizables nuevas: `heliBox`, `enemyBulletBox`).
+- Docs (Fase 4): `MEMORY.md` (+185 líneas: 6 ADs nuevos, file tree actualizado, guía "Cómo añadir una animación"), `BUILD_LOG.md` (+74 entrada), `PROMPTS.md` (este registro).
+
+**Prompt:**
+> vale procede con las 4 fases en orden
+
+**Resultado:** ✅ merged (`tsc --noEmit` limpio tras cada fase).
+**Notas:**
+- **Cero cambios de comportamiento observables** en gameplay. El refactor es isomorfo.
+- TypeScript atrapó un bug durante Fase 3 (`RocketData` vs `BulletData` structural mismatch) antes de llegar a runtime. Fix: importar `type RocketData` y helpers específicos que no leen los campos de bala.
+- La Fase 2 introduce `player.triggerShootAnim(dur)` como hook público para cuando main.ts lo conecte al fire event del arma. Hasta entonces, el estado 'shoot' no se activa pero el registry ya lo espera con fallback a 'idle'.
+- La Fase 3 no redujo LOC de `main.ts` (+29 netos), pero reorganiza la lógica en helpers nombrados: añadir una 5ª arma/enemigo ahora es 1 función, no 50 líneas de copy-paste.
+
+---
+
+### [2026-04-15] — P06 · Player idle sprite integration + PNG optimization pipeline
+**Objetivo:** Conectar el PNG del sprite idle (6 frames, horizontal strip) al juego, arreglar el bug de UV donde `tex.repeat` y `map.offset` usaban divisores distintos, y establecer un pipeline reproducible de optimización PNG con pngquant.
+**Modelo:** Claude Opus 4.6 (1M context)
+**Archivo(s) afectado(s):**
+- Rewrite: `src/gfx/playerSprite.ts` (API `getPlayerTexture()` + `preloadPlayerSprite()`, constantes `PLAYER_IDLE_FRAMES`/`PLAYER_IDLE_FPS`).
+- Edit: `src/entities/player.ts` (eliminar `tex.repeat.set(1/17, 1)` bug, usar constantes compartidas, hide-until-loaded).
+- Nuevo: `scripts/optimize-sprites.mjs` (batch pngquant idempotente).
+- Nuevo: `public/assets/README.md` (convención de sprites + comando de build).
+- Edit: `package.json` (+`pngquant-bin` devDep, +`optimize:sprites` script).
+- Asset: `public/assets/sprites/player/player_idle.png` optimizado 232 KB → 68 KB (-70.9%).
+
+**Prompt:**
+> Optimizalo y añadelo que quiero probarlo in game y despues seguimos con las demas animaciones, actualiza tambien los .md necesarios.
+
+**Resultado:** ✅ merged (`tsc --noEmit` limpio, script `optimize:sprites` verificado idempotente).
+**Notas:**
+- Bug raíz: el constructor de Player hacía `tex.repeat.set(1/17, 1)` (comentario mencionaba un sheet consolidado futuro de 17 frames) pero `syncMesh()` calculaba offsets como `frame * (1/6)`. Divisor incorrecto → recortes de frame desfasados. Regla nueva en AD-037: UV config SOLO en el módulo del sprite.
+- Fail-open en preload: si el PNG da 404, el mesh se muestra igual con log de error en vez de quedarse invisible para siempre.
+- Pngquant exit codes 98 (no quality improvement) y 99 (skip-if-larger matched) tratados como "skip, no failure" — hace el script idempotente.
+- Performance check: 68 KB de PNG es el asset más pesado del proyecto; presupuesto total de la Jam ~300 KB gzipped, hay margen para ~3-4 animaciones más del player + sprites de enemigos antes de saturar.
+
+---
+
 ### [2026-04-12] — P05 · Enemy pool genérico (soldier / shield / tank) + type distribution deslizante
 **Objetivo:** Reemplazar el `SoldierPool` específico por un `EnemyPool` config-driven que soporta los 3 tipos del GDD (raso, escudo, tanqueta) con stats distintos. Añadir HP/damage para la tanqueta, `blocksFrontalBullets` para el escudo, y distribución de tipos que desliza de 90/9/1 a 70/20/10 sobre 180 s.
 **Modelo:** Claude Opus 4.6 (1M context)

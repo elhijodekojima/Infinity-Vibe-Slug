@@ -83,81 +83,118 @@
 **Decisión:** Unificar los sistemas de AI, Terrain y Drops mediante un "Contexto de Combate" que categoriza geográficamente el terreno activo (`choke_low`, `chaotic`, `high_ground`) y afecta la probabilidad base de spawns e items dinámicamente cada 0.25s.
 **Razón:** Evita la desconexión mecánica y asegura una reactividad sistémica ("Emergent Gameplay") estilo Left 4 Dead AI Director.
 
+### AD-037 — Sprite assets viven en `public/`, no en `src/assets/`
+**Fecha:** 2026-04-15
+**Decisión:** Los sprite sheets PNG se sirven desde `public/assets/sprites/<categoría>/<nombre>.png` con URLs estables (`/assets/...`). Vite/Vercel los sirven tal cual, sin hashing ni procesamiento bundler.
+**Razón:** Paths predecibles para los loaders; evita un `import` por cada sprite. Trade-off: no hay auto-inline como data-URI, pero los sheets son >4 KB de todas formas.
+
+### AD-038 — Configuración de UV en el módulo de sprite, NO en el consumidor
+**Fecha:** 2026-04-15
+**Decisión:** `texture.repeat`, `texture.offset` inicial, filtros y mipmaps se setean UNA vez en `gfx/<x>Sprite.ts` (`configureTexture()`). El consumidor (Player, EnemyPool) solo lee `texture.offset.x = frame / frameCount` para avanzar la animación.
+**Razón:** Un bug `repeat=1/17` del consumidor contra `offset=1/6` del consumidor rompió los recortes de frame. Una sola fuente de verdad por textura.
+
+### AD-039 — Preload de sprites con fail-open
+**Fecha:** 2026-04-15
+**Decisión:** Si un PNG da 404 o error de red, el módulo de sprite resuelve el preload igualmente (sin rechazar la Promise) y `getAnimation()` hace fallback a `idle`. Logueo de warning, nunca crash.
+**Razón:** El juego sigue jugable aunque falten animaciones durante la fase de producción de arte.
+
+### AD-040 — Registry de animaciones del player (1 clase, N estados)
+**Fecha:** 2026-04-15
+**Decisión:** `playerSprite.ts` expone un `Record<PlayerAnim, AnimDef>` inmutable con metadata (url, frames, fps, loop) + runtime map con `Texture` cacheada. `Player` selecciona su `PlayerAnim` cada frame (via `selectAnim()`) y swappea `material.map` cuando cambia, sin recrear materiales ni geometrías.
+**Razón:** Añadir una animación = 1 entrada en el registry + 1 PNG + 1 caso en `selectAnim()`. Cero duplicación de loaders, precargas o constantes de frames.
+
+### AD-041 — Optimización PNG como paso de build, no de runtime
+**Fecha:** 2026-04-15
+**Decisión:** `pngquant-bin` como devDep + `npm run optimize:sprites` (script Node idempotente que recorre `public/assets/sprites/**`). Se ejecuta en la máquina del autor antes del commit; los PNGs servidos a usuarios ya están comprimidos.
+**Razón:** Sin overhead en la carga del juego. Resultado medido en `player_idle.png`: 232 KB → 68 KB (-70.9%).
+
+### AD-042 — Cero `any` en fronteras de módulo
+**Fecha:** 2026-04-15
+**Decisión:** Todo parámetro de función cruzando módulos tiene su tipo formal. `TerrainManager`, `HelicopterPool` y `EnemyPool` se importan con `import type` cuando solo se usan como tipo.
+**Razón:** TypeScript atrapa bugs antes de runtime (ej. método renombrado en TerrainManager detecta los callsites). Autocompletado funciona en el IDE. El coste es un `import type` extra por archivo.
+
 ---
 
-## 📁 Estructura de carpetas propuesta (Zero-Loading)
+## 📁 Estructura de carpetas (estado real al 2026-04-15)
 
 ```
 infinity-vibe-slug/
-├── index.html                    # ⚡ ≤3KB — UI instantánea, primer paint
-├── public/
-│   └── favicon.svg               # inline SVG <1KB
-├── src/
-│   ├── main.ts                   # 🚀 entry point, arranca core + UI bindings
-│   │
-│   ├── ui/                       # 🪶 HTML/CSS UI SÚPER LIGERO (primer frame)
-│   │   ├── hud.ts                # contadores de score, armas, granadas
-│   │   ├── menu.ts               # pantalla inicial (username)
-│   │   ├── gameover.ts           # pantalla de game over
-│   │   └── styles.css            # estilos inline en index.html si es posible
-│   │
-│   ├── core/                     # ⚙️ MOTOR (Three.js base, loop, resize)
-│   │   ├── renderer.ts           # WebGLRenderer + scene + camera ortográfica
-│   │   ├── loop.ts               # fixed-step sim + rAF render loop
-│   │   ├── input.ts              # teclado (P1/P2) + touch (bonus móvil)
-│   │   ├── resize.ts             # handler responsive de canvas
-│   │   ├── clock.ts              # delta time, tiempo de juego global
-│   │   └── audio.ts              # Web Audio API — SFX procedurales 16-bit
-│   │
-│   ├── gfx/                      # 🎨 GENERACIÓN PROCEDURAL DE GRÁFICOS
-│   │   ├── pixelGen.ts           # pixel-art sprites en canvas offscreen → textura
-│   │   ├── palette.ts            # paleta NeoGeo / Metal Slug
-│   │   ├── shaders/
-│   │   │   ├── parallaxBG.glsl   # fondo desplazándose
-│   │   │   ├── crt.glsl          # filtro CRT/scanlines (bonus)
-│   │   │   └── explosion.glsl    # efecto de explosión AoE
-│   │   └── instancedMesh.ts      # wrapper para pools de instanced rendering
-│   │
-│   ├── entities/                 # 👥 ENTIDADES DEL JUEGO (geometrías ligeras)
-│   │   ├── player.ts             # jugador: mov, salto, disparo, granada, melee
-│   │   ├── enemies/
-│   │   │   ├── soldier.ts        # raso — 85-90%
-│   │   │   ├── shieldSoldier.ts  # escudo — 9%
-│   │   │   └── tank.ts           # tanqueta — 1% inicial
-│   │   ├── bullets.ts            # balas jugador + enemigas (pooled)
-│   │   ├── grenades.ts           # parábola + AoE
-│   │   ├── weapons/
-│   │   │   ├── pistol.ts
-│   │   │   ├── machinegun.ts
-│   │   │   ├── shotgun.ts
-│   │   │   └── rocket.ts
-│   │   ├── drops.ts              # pickups de armas + granadas
-│   │   └── platforms.ts          # obstáculos y rampas procedurales
-│   │
-│   ├── systems/                  # 🧮 LÓGICA DE JUEGO GLOBAL
-│   │   ├── spawnSystem.ts        # escalado exponencial de oleadas
-│   │   ├── dropSystem.ts         # probabilidad base + pity + modificadores
-│   │   ├── collisionSystem.ts    # AABB simplificado, no físicas reales
-│   │   ├── scoreSystem.ts        # X / 2X / 5X + high-score
-│   │   ├── difficultyCurve.ts    # curva de escalado (tipo de enemigo, velocidad)
-│   │   └── persistence.ts        # localStorage (username, highscore)
-│   │
-│   └── config/                   # ⚙️ Constantes balanceables
-│       ├── balance.ts            # cadencias, daños, probabilidades, pity
-│       └── colors.ts             # paleta global
-│
-├── RULES.md                      # reglas de la Jam
-├── STACK.md                      # stack + manifiesto assets
-├── GAME_DESIGN.md                # GDD estructurado
-├── MEMORY.md                     # ← este archivo
-├── BUILD_LOG.md                  # diario
-├── PROMPTS.md                    # registro de prompts IA
-├── SUBMISSION_CHECKLIST.md       # checklist de envío
-├── ERROR_LOG.md                  # bugs críticos
-├── package.json
+├── index.html                      # ⚡ ≤4 KB — CSS crítico inline, menú/HUD/gameover en DOM
+├── package.json                    # scripts: dev, build, preview, typecheck, optimize:sprites
 ├── tsconfig.json
 ├── vite.config.ts
-└── vercel.json                   # headers cache, rewrites
+├── vercel.json                     # headers cache, rewrites
+├── .gitignore
+│
+├── public/                         # Assets servidos por Vite / Vercel sin procesamiento
+│   └── assets/
+│       ├── README.md               # convenciones de sprites
+│       └── sprites/
+│           └── player/
+│               └── player_idle.png # 68 KB (optimizado con pngquant, 6 frames 1180×194)
+│
+├── scripts/
+│   └── optimize-sprites.mjs        # npm run optimize:sprites — batch pngquant idempotente
+│
+├── src/
+│   ├── main.ts                     # 🚀 bootstrap, state machine, game loop, collision passes
+│   │
+│   ├── ui/                         # 🪶 DOM puro, se pinta antes que el canvas
+│   │   ├── hud.ts
+│   │   ├── menu.ts
+│   │   └── gameover.ts
+│   │
+│   ├── core/                       # ⚙️ Motor
+│   │   ├── renderer.ts             # WebGLRenderer + OrthographicCamera (altura fija 270)
+│   │   ├── loop.ts                 # Fixed-step sim (60 Hz) + rAF render
+│   │   ├── input.ts                # WASD + jump + fire + grenade + aim + crouch
+│   │   ├── clock.ts                # Delta time
+│   │   └── persistence.ts          # localStorage (highscore, username)
+│   │
+│   ├── gfx/                        # 🎨 Generación visual
+│   │   ├── background.ts           # ShaderMaterial parallax (pure GLSL, zero assets)
+│   │   ├── pixelGen.ts             # makePixelTexture(frames, palette) → CanvasTexture
+│   │   ├── playerSprite.ts         # Registry de animaciones (PNG externos, ver AD-040)
+│   │   ├── enemySprite.ts          # Canvas-generated sprites (soldier/shield/tank/heli)
+│   │   └── itemSprite.ts           # Drop pickups (machinegun/shotgun/rocket/grenade)
+│   │
+│   ├── entities/
+│   │   ├── player.ts               # Physics + state machine de animación
+│   │   ├── bullets.ts              # BulletPool (player) + EnemyBulletPool (bullet/bomb/cannonball)
+│   │   ├── grenades.ts             # Parabólica con onExplode callback
+│   │   ├── explosions.ts           # Pool solo visual (AD-018)
+│   │   ├── terrainPools.ts         # InstancedMesh para suelo + plataformas
+│   │   ├── enemies/
+│   │   │   ├── enemyPool.ts        # Clase genérica (soldier/shield/tank) — AD-020
+│   │   │   └── helicopterPool.ts   # Patrol → approach → lock → exit, dropea bombs
+│   │   └── weapons/
+│   │       ├── weapon.ts           # Interface común (label/ammo/isAutomatic/tickCooldown/tryFire)
+│   │       ├── pistol.ts           # Infinita, semi-auto, cadencia cap 0.25s
+│   │       ├── machinegun.ts       # 200 balas, automática, cadencia 0.1s
+│   │       ├── shotgun.ts          # 50 balas, 3-spread, cono corto, atraviesa escudo
+│   │       └── rocketLauncher.ts   # 20 rockets, usa RocketPool, explosión AoE
+│   │
+│   ├── systems/
+│   │   ├── collisions.ts           # AABB center-based (pure functions, zero alloc)
+│   │   ├── spawnSystem.ts          # Exponencial × fases × context — typed (AD-042)
+│   │   ├── difficultyDirector.ts   # Pressure score + fases (domin./normal/struggle)
+│   │   └── terrain/
+│   │       └── terrainManager.ts   # Chunks procedurales, 5+ patrones, slice rendering
+│   │
+│   └── config/
+│       ├── balance.ts              # 19 bloques `export const` — única fuente de balance
+│       └── colors.ts               # Paleta NeoGeo (hex literales)
+│
+├── RULES.md                        # Reglas de la Jam
+├── STACK.md                        # Stack + manifiesto de assets
+├── GAME_DESIGN.md                  # GDD estructurado
+├── MEMORY.md                       # ← este archivo (índice AD + file tree + convenciones)
+├── BUILD_LOG.md                    # Diario cronológico de hitos
+├── PROMPTS.md                      # Registro de prompts IA (regla 90% de la Jam)
+├── SUBMISSION_CHECKLIST.md         # Checklist de envío final
+├── ERROR_LOG.md                    # Bugs críticos
+├── README.md
+└── gdd.txt                         # GDD original del usuario (intocado)
 ```
 
 ### Principios de separación (clave)
@@ -208,8 +245,30 @@ infinity-vibe-slug/
 - ✅ PASO 7: Difficulty Director, Dynamic Drops y Gameplay Polish.
 - ✅ PASO 8: Sistema de Obstáculos Procedurales y Terreno Dinámico.
 - ✅ PASO 9: Combat Context Layer, Helicópteros (Enemigos Aéreos) y Sistema de Pausa.
-- 🚧 **Stand-by (Work in Progress):** Integración de Spritesheets PNG de alta fidelidad para Player (Diego) y entidades (a la espera de arte por parte del usuario).
-- ⏸️ **Pendiente:** Efectos de sonido (Web Audio API) y menús/HUD finales.
+- ✅ PASO 10: **Integración de la primera animación del Player** (`player_idle.png`, 6 frames) + pipeline de optimización PNG (`npm run optimize:sprites`).
+- ✅ PASO 11: **Limpieza de código y docs** — tipado estricto (cero `any` cruzando módulos), registry de animaciones extensible (`PlayerAnim` union + fallback a `idle`), índice AD actualizado, file tree sincronizado con realidad.
+- 🚧 **Work in Progress:** Animaciones adicionales del Player (run / shoot / jump / crouch / aimUp) — arte pendiente, el registry ya las espera con fallback.
+- ⏸️ **Pendiente:** SFX (Web Audio API), sprites pixel-art para enemigos (actualmente generados proceduralmente), menús/HUD finales, deploy a Vercel, snippet para el Google Form.
+
+---
+
+## 🎯 Cómo añadir una nueva animación del player
+
+Con el registry de AD-040, el flujo es **3 pasos**:
+
+1. **Arte**: dibujar una sprite sheet horizontal de N frames y guardarla como `public/assets/sprites/player/player_<nombre>.png`.
+2. **Registry**: añadir una entrada en `DEFS` dentro de `src/gfx/playerSprite.ts`:
+   ```ts
+   run: { url: '/assets/sprites/player/player_run.png', frames: 8, fps: 12, loop: true },
+   ```
+3. **Transición**: añadir el caso en `Player.selectAnim()` en `src/entities/player.ts`:
+   ```ts
+   if (vx !== 0) return 'run';
+   ```
+
+Después ejecutar `npm run optimize:sprites` para comprimir el PNG antes de commit.
+
+Si el PNG no existe en el server, `getAnimation()` hace fallback automático a `idle` — el juego no peta durante el desarrollo del arte.
 
 ---
 
