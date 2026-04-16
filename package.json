@@ -9,13 +9,15 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "optimize:sprites": "node scripts/optimize-sprites.mjs"
+    "optimize:sprites": "node scripts/optimize-sprites.mjs",
+    "generate:placeholders": "node scripts/generate-placeholder-sprites.mjs"
   },
   "dependencies": {
     "three": "^0.160.0"
   },
   "devDependencies": {
     "@types/three": "^0.160.0",
+    "pngjs": "^7.0.0",
     "pngquant-bin": "^9.0.0",
     "typescript": "^5.3.3",
     "vite": "^5.0.10"
