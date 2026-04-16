@@ -9,23 +9,43 @@ bundler processing.
 
 ```
 public/assets/
-├── README.md                 ← this file
+├── README.md                         ← this file
 └── sprites/
-    ├── player/               ← LAYERED system (2 concurrent layers, see below)
+    ├── player/                       ← THREE-LAYER system (legs + torso + weapon)
     │   │
-    │   ├── player_idle.png             ← legacy fallback (full body, 6 frames)
+    │   ├── player_idle.png           ← legacy fallback (full body, 6 frames)
+    │   │                               Kept while layered sheets are being authored.
+    │   │                               Ignored once the layered set is complete.
     │   │
-    │   ├── player_legs_idle.png        ← LEGS layer — movement states
+    │   ├── LEGS LAYER ─ movement animations ─────────────────────
+    │   ├── player_legs_idle.png
     │   ├── player_legs_run.png
     │   ├── player_legs_jump.png
     │   ├── player_legs_crouch.png
     │   │
-    │   ├── player_torso_idle.png       ← TORSO layer — action states
-    │   ├── player_torso_shoot.png
-    │   ├── player_torso_aimup.png
-    │   ├── player_torso_aimdown.png
-    │   ├── player_torso_throw.png
-    │   └── player_torso_melee.png
+    │   ├── TORSO LAYER ─ body + head + arms, NO weapon ──────────
+    │   ├── player_torso_idle.png             (action=idle,  orient=neutral)
+    │   ├── player_torso_idle_up.png          (action=idle,  orient=up)
+    │   ├── player_torso_idle_down.png        (action=idle,  orient=down)
+    │   ├── player_torso_shoot.png            (action=shoot, orient=neutral)
+    │   ├── player_torso_shoot_up.png         (action=shoot, orient=up)
+    │   ├── player_torso_shoot_down.png       (action=shoot, orient=down)
+    │   ├── player_torso_melee.png            (action=melee — neutral only)
+    │   ├── player_torso_throw.png            (action=throw — neutral only)
+    │   │
+    │   └── WEAPON LAYER ─ weapon only ────────────────────────────
+    │       ├── player_weapon_pistol_neutral.png
+    │       ├── player_weapon_pistol_up.png
+    │       ├── player_weapon_pistol_down.png
+    │       ├── player_weapon_machinegun_neutral.png
+    │       ├── player_weapon_machinegun_up.png
+    │       ├── player_weapon_machinegun_down.png
+    │       ├── player_weapon_shotgun_neutral.png
+    │       ├── player_weapon_shotgun_up.png
+    │       ├── player_weapon_shotgun_down.png
+    │       ├── player_weapon_rocket_neutral.png
+    │       ├── player_weapon_rocket_up.png
+    │       └── player_weapon_rocket_down.png
     │
     ├── enemies/              ← SINGLE-sheet system (full-body per animation)
     │   ├── soldier_walk.png
@@ -36,108 +56,165 @@ public/assets/
     └── ui/
 ```
 
-## Player layered animation (only the main character)
+## The three-layer player system (only the main character)
 
-To avoid the combinatorial explosion of full-body sheets for every
-movement × action combination (run+shoot, jump+shoot, crouch+aimUp...),
-the player is split into **two independent layers** that animate
-concurrently: **legs** (movement) + **torso** (actions/weapon).
+Full rationale in `MEMORY.md` (AD-044, AD-046, AD-047). Summary:
+
+- Combinatorial explosion of full-body sheets (movement × action × aim ×
+  weapon) is avoided by running **three independent layers**, each on a
+  20×32 quad at the exact same world position.
+- Torso has a **two-dimensional state**: `(action, orientation)`. Action
+  = idle/shoot/melee/throw. Orientation = neutral/up/down. The registry
+  is sparse: define only the cells that have distinct art, the rest
+  fall back via cascade.
+- Weapon is an **independent layer**. Same torso art works for every
+  weapon; swapping weapons swaps only the weapon sheet.
+- All three layers share the SAME 20×32 canvas. Alignment is achieved
+  by drawing each layer's pixels at a consistent anchor (feet / waist /
+  hand grip). No anchor math in code — the artist's grid is the contract.
 
 ### Layer responsibilities
 
-| Layer | Drives | States |
-|---|---|---|
-| `legs` | physics / movement | `idle`, `run`, `jump`, `crouch` |
-| `torso` | action / weapon pose | `idle`, `shoot`, `aimUp`, `aimDown`, `throw`, `melee` |
+| Layer  | Drives                   | States                                          |
+|--------|--------------------------|-------------------------------------------------|
+| legs   | physics / movement       | `idle`, `run`, `jump`, `crouch`                 |
+| torso  | body + head + arms       | `(action, orientation)` — see above             |
+| weapon | weapon asset             | `(weaponType, orientation)` — single-frame each |
 
-Both layers animate with their own timer; a single state machine per
-layer decides the current frame.
+### Fallback cascade (makes migration incremental)
 
-### Authoring rules for the player
+Missing sheets never crash the game — each layer cascades gracefully:
 
-1. **Same canvas for both layers.** Every frame of every layer is drawn
-   on the full 20×32 character bounding box. The legs sheet shows pixels
-   only for legs + lower hip (the top half is transparent); the torso
-   sheet shows pixels only for torso + arms + weapon (the bottom half is
-   transparent). Both meshes overlay at the same world position →
-   alignment is automatic, zero anchor math.
+| Layer  | Cascade                                                                    |
+|--------|----------------------------------------------------------------------------|
+| legs   | requested → `legs.idle` → legacy full-body → empty slot                    |
+| torso  | `action_orient` → `action_neutral` → `idle_neutral` → legacy full-body     |
+| weapon | `type_orient` → `type_neutral` → **null** (weapon mesh hidden)             |
 
-2. **Consistent anchor.** Keep the feet at the same row of every `legs_*`
-   frame (e.g., row 30 of a 32-tall sheet). Keep the waist/hip line at
-   the same row of every `torso_*` frame. Then crouching works via a
-   single `PLAYER.TORSO_CROUCH_Y_OFFSET` shift in code.
+When the torso is using the legacy fallback (because no `torso_*` sheet
+has loaded yet), the weapon mesh is **suppressed automatically** — the
+legacy sheet already has a weapon drawn on it, so adding the weapon
+layer would render two weapons on top of each other.
 
-3. **Horizontal strips, same resolution.** All frames in a sheet are the
-   same size, laid out left to right. Frame count + FPS + loop flag live
-   in `src/gfx/playerSprite.ts` in the `LEGS_DEFS` / `TORSO_DEFS` maps.
+---
 
-4. **Progressive migration.** Drop sheets one at a time — the player
-   falls back to the legacy `player_idle.png` until at least one layered
-   sheet is available. Specifically:
-   - If `player_legs_<state>.png` is missing → legs layer uses
-     `player_idle.png`.
-   - If `player_torso_<state>.png` is missing → torso layer is invisible.
-   - Effect: until any torso sheet loads, the character renders exactly
-     as with the single-layer idle sheet.
+## 🛒 Complete sprite shopping list
 
-### Adding a new player animation
+All sheets **must be 20 × 32 per frame** (the full character bounding
+box), horizontal strip for multi-frame. Rows with pixels belong to the
+layer's region; everything else is transparent.
 
-```
-1. Draw   → save to public/assets/sprites/player/player_<layer>_<state>.png
-2. Entry  → add { url, frames, fps, loop } in LEGS_DEFS or TORSO_DEFS
-3. Wire   → if new state, add it to the selector in player.ts
-            (selectLegsAnim / selectTorsoAnim).
-4. Optim  → npm run optimize:sprites
-```
+### LEGS LAYER — 4 sheets
 
-Trigger-based torso states (shoot/melee/throw) are already wired — main.ts
-calls `player.triggerShootAnim(dur)`, `triggerMeleeAnim(dur)`,
-`triggerThrowAnim(dur)` when the corresponding event fires.
+| File | Frames | FPS | Loop | Notes |
+|---|---|---|---|---|
+| `player_legs_idle.png` | 6 | 8 | yes | Breathing micro-animation on the lower body |
+| `player_legs_run.png` | 8 | 12 | yes | Full run cycle |
+| `player_legs_jump.png` | 1 | – | – | In-air leg pose (knees tucked) |
+| `player_legs_crouch.png` | 1 | – | – | Folded legs pose — `TORSO_CROUCH_Y_OFFSET` shifts the torso down |
 
-## Rules
+Anchor: **feet at row 29–30** of the 32-tall canvas. Never move them across frames or the character will jitter.
 
-1. **Horizontal strips only.** All animation sheets are one row of N frames,
-   left-to-right. Makes UV math trivial: `offset.x = frame / frameCount`.
+### TORSO LAYER — 8 sheets (action × orientation, sparse)
+
+| File | Frames | FPS | Loop | Action / orientation |
+|---|---|---|---|---|
+| `player_torso_idle.png` | 4 | 6 | yes | idle × neutral — breathing torso |
+| `player_torso_idle_up.png` | 1 | – | – | idle × up — aimed upward at rest |
+| `player_torso_idle_down.png` | 1 | – | – | idle × down — aimed downward (air only) |
+| `player_torso_shoot.png` | 4 | 16 | no | shoot × neutral — fire recoil |
+| `player_torso_shoot_up.png` | 4 | 16 | no | shoot × up — fire while aimed up |
+| `player_torso_shoot_down.png` | 4 | 16 | no | shoot × down — fire while aimed down |
+| `player_torso_melee.png` | 3 | 16 | no | Knife swing (neutral only) |
+| `player_torso_throw.png` | 3 | 12 | no | Overhand grenade throw (neutral only) |
+
+Anchor: **waist at row 13–14**. The torso quad is the SAME size as the
+legs quad (20 × 32); only the top half has pixels. The waist line must
+match the `legs_*` sheets' hip line exactly. Draw head + shoulders +
+arms INCLUDING the hand where the weapon will attach — but **do NOT
+draw the weapon itself**. That's the weapon layer's job.
+
+### WEAPON LAYER — 12 sheets (4 weapons × 3 orientations)
+
+All single-frame static sheets (no per-weapon animation for now):
+
+| Weapon | neutral | up | down |
+|---|---|---|---|
+| pistol | `player_weapon_pistol_neutral.png` | `player_weapon_pistol_up.png` | `player_weapon_pistol_down.png` |
+| machinegun | `player_weapon_machinegun_neutral.png` | `player_weapon_machinegun_up.png` | `player_weapon_machinegun_down.png` |
+| shotgun | `player_weapon_shotgun_neutral.png` | `player_weapon_shotgun_up.png` | `player_weapon_shotgun_down.png` |
+| rocket | `player_weapon_rocket_neutral.png` | `player_weapon_rocket_up.png` | `player_weapon_rocket_down.png` |
+
+Anchor: the **weapon grip** is painted at the exact (x, y) pixel where
+the character's hand is on the corresponding `player_torso_<action>_<orientation>.png`
+sheet. The weapon mesh is the SAME 20 × 32 quad at the SAME world
+position as the torso — pixel-perfect alignment is achieved by painting
+at the correct coordinates, not by code transforms.
+
+### Grand total: **24 layered sheets** (+ 1 legacy full-body to keep)
+
+Compared to the combinatorial alternative (4 legs × 4 actions × 3 orientations × 4 weapons = 192 sheets), this is a ~**8× reduction** in artwork cost.
+
+---
+
+## 🎯 Authoring priority (what to draw first for fastest validation)
+
+1. **`player_legs_idle.png`** + **`player_torso_idle.png`** + **`player_weapon_pistol_neutral.png`**
+   → MVP static character with pistol. Validates that all three layers
+     align and render correctly. Torso layer activates on first load of
+     `torso_idle`, which also enables the weapon layer.
+
+2. **`player_legs_run.png`**
+   → unlocks the "running" feel.
+
+3. **`player_torso_shoot.png`**
+   → fire feedback. Main.ts already calls `player.triggerShootAnim(0.2)` on
+     every successful shot.
+
+4. **`player_torso_idle_up.png`** + **`player_weapon_pistol_up.png`**
+   → first aim-up pose. Validates the (action, orientation) matrix and
+     weapon rotation.
+
+5. Progressive fill-in: remaining torso sheets, remaining weapon orientations,
+   then alternate weapon sprites (MG / shotgun / rocket).
+
+---
+
+## Universal rules (all sprites, not just player)
+
+1. **Horizontal strips only.** One row of N frames left-to-right. UV math
+   is trivial: `offset.x = frame / frameCount`.
 2. **Frame count lives in code**, not the filename. Declared in the
    relevant registry (e.g. `LEGS_DEFS.run.frames = 8` in
-   `src/gfx/playerSprite.ts`). Keep the sheet and the registry in sync —
-   a mismatch causes the animation to tear or freeze.
+   `src/gfx/playerSprite.ts`). Sheet and registry must stay in sync.
 3. **Power-of-two width is NOT required** — we disable mipmaps and use
-   nearest-neighbor filtering. The PNG can be any size.
-4. **Optimize before committing.** Any PNG going into `public/` should be
-   run through `pngquant` lossy compression (negligible visual loss on
-   pixel art, 50–70% size reduction). We ship a repo-local tool:
+   nearest-neighbor filtering. Any dimensions work.
+4. **Optimize before committing**:
    ```
    npm run optimize:sprites
    ```
-   This walks every PNG under `public/assets/sprites/**`, applies
-   `pngquant --quality 65-80 --force --skip-if-larger --strip`, and is
-   idempotent (already-optimal files are skipped, not failed). Measured
-   result on `player/player_idle.png`: 232 KB → 68 KB (-70.9%).
-5. **Budget**: the Jam disqualifies games with heavy downloads. Keep the
-   **total** of all sprites + audio + JS bundle under ~**300 KB gzipped**.
-   Individual PNGs bigger than 50 KB should be a deliberate decision
-   (document in `BUILD_LOG.md`).
+   Idempotent, lossy pngquant at quality 65–80 (visually lossless on
+   pixel art). Measured on `player_idle.png`: 232 KB → 68 KB (-70.9%).
+5. **Budget**: the Jam disqualifies games with heavy downloads. Total
+   (sprites + audio + JS gzipped) must stay under ~**300 KB**.
+   Individual PNGs >50 KB need a justification note in `BUILD_LOG.md`.
 
 ## Why `public/` and not `src/assets/`?
 
-- `public/` paths are stable and predictable — we can reference them by
-  literal URL strings without running through the bundler.
-- Trade-off: no automatic inlining of small assets as data URIs. If a
-  sprite is tiny (<4 KB) and we want it inlined, put it in `src/assets/`
-  and `import` it (Vite handles the conversion via `assetsInlineLimit`).
-- For sprite sheets that are always >4 KB, `public/` is the simpler path.
+- Stable URL paths without bundler processing, ideal for runtime loaders.
+- Trade-off: no auto-inline as data URIs. Small (<4 KB) sprites can go to
+  `src/assets/` + `import` to get inlined instead.
+- For sheets that are always >4 KB (i.e., all of ours), `public/` wins.
 
-## Pixel-art authoring tips (if creating sprites)
+## Pixel-art authoring tips
 
-- Integer sprite dimensions: 32×32, 48×48, 64×64 per frame work well at
-  the game's internal 480×270 resolution.
-- Authorial canvas color doesn't matter — transparent background only.
-- Export as PNG-8 with alpha when possible; pngquant enforces this.
-- Keep the character's "anchor" (feet / pivot) at a fixed position across
-  all frames so the mesh doesn't jitter during animation swaps.
-- For the **player layered system specifically**: keep the **feet** fixed
-  across all `legs_*` sheets AND the **waist** fixed across all `torso_*`
-  sheets. Mismatched anchors across frames within one layer cause the
-  mesh to jitter; mismatched anchors across layers cause the torso to
-  "float" or "sink" relative to the legs.
+- Integer sprite dimensions. Our standard is **20 × 32 per frame** for
+  all player layers.
+- Authorial canvas color: transparent only.
+- Export as PNG-8 with alpha where possible; pngquant will enforce this.
+- **Keep anchors fixed**:
+  - Across all frames of one sheet (feet in legs, waist in torso, grip
+    in weapon) — otherwise mesh jitters.
+  - Across layers for the SAME orientation (legs hip row ≡ torso waist
+    row; torso hand pixel ≡ weapon grip pixel) — otherwise the character
+    falls apart visually.

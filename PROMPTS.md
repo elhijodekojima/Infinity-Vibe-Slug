@@ -33,6 +33,29 @@
 
 ---
 
+### [2026-04-16] — P09 · Extensión del sistema layered: arma separada + aim vertical como matriz
+**Objetivo:** Evolucionar el sistema de 2 capas (legs + torso-con-todo) a 3 capas con arma como layer independiente y torso como matriz `(action × orientation)`. Evitar la explosión combinatoria restante (armas × poses) y permitir swap dinámico de armas sin tocar las animaciones de torso. Integrar con el estado existente (main.ts) sin romper wiring. Solo aplica al personaje principal.
+**Modelo:** Claude Opus 4.6 (1M context)
+**Archivo(s) afectado(s):**
+- Rewrite `src/gfx/playerSprite.ts`: 3 registries (legs + torso matrix + weapon matrix), 4-step fallback cascada en torso, 3-step en weapon (null hide), `isLegacy` flag en Animation.
+- Rewrite `src/entities/player.ts`: 3er mesh (`weaponMesh`), estado torso 2D (`_torsoAction` + `_aimOrientation`), `_currentWeapon` + `setWeapon()` API, suppresión de weapon en modo-legacy, z-stacking ordenado.
+- Modificado `src/main.ts`: helper `weaponLabelToType()`, 1 llamada `setWeapon()` por frame (idempotente), 3 llamadas `trigger*Anim(dur)` en fire/melee/throw.
+- Expandido `public/assets/README.md`: lista de compra completa de 24 sheets con frames/FPS/loop/prioridad, tablas de responsabilidades por capa y fallback cascada por capa.
+- MEMORY.md: AD-046 (arma independiente), AD-047 (torso matrix), AD-048 (isLegacy guard). PASO 13 en estado actual. Sección "cómo añadir animación" reescrita para 3 capas.
+
+**Prompt:**
+> Extiende el sistema de animación modular actual del personaje principal para soportar armas intercambiables y variaciones de apuntado vertical [...]. Separación del arma como elemento independiente del torso. Soporte para apuntado vertical (incluyendo cabeza y torso).
+
+**Resultado:** ✅ merged (`tsc --noEmit` limpio).
+**Notas:**
+- **Reducción combinatoria final**: 192 sheets combinatorio → 24 sheets layered. ~8× menos arte.
+- Registry del torso es `Partial<Record<"<action>_<orientation>", AnimDef>>` — sparse. `melee_up`, `throw_down` etc se omiten; cascada los resuelve a `melee_neutral` / `throw_neutral` automáticamente.
+- `weaponMesh` vive en el mismo Group que `torsoMesh` → hereda scale.x flip, crouch Y-offset y preload gate gratis.
+- `isLegacy` guard: durante migración (solo el `player_idle.png` en disco), la weaponMesh se oculta porque el legacy sheet ya tiene el arma dibujada — evita duplicado visual.
+- **No toqué muzzle offset** (bug reportado de disparo descuadrado) porque los sprites cambian de todas formas — recalibrar dos veces es trabajo perdido. Se ajusta cuando lleguen los sheets nuevos de weapon+torso.
+
+---
+
 ### [2026-04-16] — P08 · Sistema de animación layered (legs + torso) para el Player
 **Objetivo:** Diseñar e implementar un sistema modular de animación por capas para el personaje principal que evite la explosión combinatoria de sheets full-body (N×M → N+M). Dos capas independientes (`legs` para movimiento, `torso` para acciones) con state machines separadas y un Group de Three.js que las superpone. Solo aplica al Player; enemigos siguen con sheets tradicionales.
 **Modelo:** Claude Opus 4.6 (1M context)

@@ -128,6 +128,21 @@
 **Decisión:** El torso tiene tres estados one-shot (`shoot`, `melee`, `throw`) que deben reproducirse cuando ocurre un evento discreto de juego, no cuando un input se mantiene. El Player expone `triggerShootAnim(dur)`, `triggerMeleeAnim(dur)`, `triggerThrowAnim(dur)` como métodos públicos. Main.ts los invoca cuando el arma dispara / melee hit / grenade throw. Cada hook enciende un timer interno; `selectTorsoAnim()` prioriza el timer > 0 sobre cualquier otro estado.
 **Razón:** Desacopla el "qué pasó" (main.ts lo sabe) del "cómo animar" (player.ts lo decide). Evita polluir el player con referencias a sistemas externos. Duración configurable por caller: shoot típicamente 0.15s, melee 0.25s, throw 0.35s.
 
+### AD-046 — Arma como 3ª capa independiente (`weaponMesh`)
+**Fecha:** 2026-04-16
+**Decisión:** El arma se extrae del sprite del torso y pasa a ser un `Mesh` separado en el mismo `Group` del Player (`legsMesh` + `torsoMesh` + `weaponMesh`). Registry `WEAPON_DEFS: Partial<Record<"<type>_<orientation>", AnimDef>>` indexado por `(WeaponType × AimOrientation)` — 4 armas × 3 orientaciones = 12 sheets. Cada weapon sheet es 20×32, mismo tamaño que las otras capas, con el arma dibujada en la posición exacta donde está la mano del torso correspondiente. Sin anchor math: la alineación es por disciplina del artista al pintar en el canvas compartido. Swap dinámico: `player.setWeapon(type)` cambia el sheet en el siguiente frame. Main.ts llama `setWeapon(weaponLabelToType(state.currentWeapon.label))` cada frame (idempotente).
+**Razón:** Las mismas animaciones de torso sirven para todas las armas → cero duplicación de sheets de torso por cada arma. Cambiar de pistola a machinegun no requiere redibujar ninguna pose del torso. En combinatorio sería `4 acciones × 3 orient × 4 armas = 48 torsos`; con arma separada, `12 torsos + 12 armas = 24 sheets`. 2× reducción solo en esa dimensión.
+
+### AD-047 — Torso como matriz `(action × orientation)` con registry disperso
+**Fecha:** 2026-04-16
+**Decisión:** El torso deja de ser un único enum de estados y pasa a ser una matriz 2D: `TorsoAction = idle|shoot|melee|throw` × `AimOrientation = neutral|up|down`. `TORSO_DEFS` es `Partial<Record<"<action>_<orientation>", AnimDef>>` — solo se definen las celdas con arte distinto. Fallback cascada: `(action,orient)` → `(action,neutral)` → `(idle,neutral)` → legacy full-body. Celdas como `melee_up`, `throw_down` se omiten y caen a `melee_neutral` / `throw_neutral` automáticamente. Selectors separados: `selectTorsoAction()` (timers de shoot/melee/throw) + `selectAimOrientation()` (a partir de `_aimAngle`), cada frame se combinan.
+**Razón:** Apuntado vertical cambia el torso ENTERO (cabeza + hombros giran), no solo los brazos — por eso no basta con el weapon como capa separada. Necesitamos variantes de torso por orientación. Pero NO todas las combinaciones tienen sentido (ej. melee+up). La sparse Record con fallback cascada permite autorear solo las celdas útiles sin explotar el registry.
+
+### AD-048 — Legacy guard suprime la capa weapon
+**Fecha:** 2026-04-16
+**Decisión:** `Animation.isLegacy: boolean` marca la hoja legacy `player_idle.png`. Cuando `getTorsoAnim()` devuelve una Animation con `isLegacy=true` (porque ningún sheet layered se ha cargado todavía), Player.syncMesh() oculta la `weaponMesh` automáticamente.
+**Razón:** La hoja legacy incluye el arma YA dibujada en el torso. Si dibujásemos además el weaponMesh encima, se vería dos armas superpuestas. El flag `isLegacy` permite al Player saber cuándo está en modo-legacy y comportarse correctamente sin tener que consultar estructuras globales.
+
 ---
 
 ## 📁 Estructura de carpetas (estado real al 2026-04-15)
@@ -263,38 +278,54 @@ infinity-vibe-slug/
 - ✅ PASO 10: **Integración de la primera animación del Player** (`player_idle.png`, 6 frames) + pipeline de optimización PNG (`npm run optimize:sprites`).
 - ✅ PASO 11: **Limpieza de código y docs** — tipado estricto (cero `any` cruzando módulos), registry de animaciones extensible + fallback a `idle`, índice AD actualizado, file tree sincronizado con realidad.
 - ✅ PASO 12: **Sistema de animación layered** (AD-044) — player dividido en legs + torso con state machines independientes, `Group` con 2 Meshes superpuestos, fallback legacy para migración progresiva. Evita explosión combinatoria (N+M vs N×M sheets).
-- 🚧 **Work in Progress:** Arte de las capas layered (4 sheets de legs + 6 sheets de torso) — pendiente del usuario. Mientras tanto el juego usa el `player_idle.png` legacy como fallback en la capa legs.
+- ✅ PASO 13: **Sistema de animación de 3 capas** (AD-046, AD-047, AD-048) — arma extraída del torso como 3ª capa independiente (`weaponMesh`); torso pasa a matriz `(action × orientation)` con registry disperso y fallback cascada en 3 niveles; hooks `trigger*Anim` conectados a weapon fire / melee / throw en main.ts; `player.setWeapon(type)` se sincroniza cada frame desde `state.currentWeapon.label`.
+- 🚧 **Work in Progress:** Arte de las 24 sheets layered (4 legs + 8 torso + 12 weapons). Lista completa en `public/assets/README.md`. Mientras tanto el juego usa el `player_idle.png` legacy como fallback en legs; `isLegacy` suprime la capa weapon para no duplicar el arma.
 - ⏸️ **Pendiente:** SFX (Web Audio API), sprites pixel-art para enemigos (actualmente generados proceduralmente), menús/HUD finales, deploy a Vercel, snippet para el Google Form.
 
 ---
 
-## 🎯 Cómo añadir una nueva animación del player (sistema layered, AD-044)
+## 🎯 Cómo añadir una nueva animación del player (sistema de 3 capas, AD-046/047)
 
-El sprite del player tiene **dos capas independientes**: legs (piernas) y torso (cuerpo + brazos + arma). Cada animación vive SOLO en una de las dos.
+El sprite del player tiene **tres capas independientes**: legs (piernas) + torso (cuerpo + cabeza + brazos, SIN arma) + weapon (solo el arma). Cada sheet vive en SOLO UNA capa.
 
-**Decide la capa primero**: si la animación afecta el movimiento del cuerpo (correr, saltar, agacharse) → `legs`. Si afecta pose de brazos/arma (disparar, apuntar, lanzar, cuchillear) → `torso`.
+**Decide primero la capa**:
+- Afecta movimiento del cuerpo (correr, saltar, agacharse) → `legs`.
+- Afecta pose de cuerpo/cabeza/brazos (idle, disparo, apuntado vertical, melee, throw) → `torso` con dimensión opcional `orientation`.
+- Es una nueva arma o variante de arma → `weapon` por `(type × orientation)`.
 
 Luego el flujo es **3 pasos**:
 
-1. **Arte**: dibujar el sheet horizontal en el canvas 20×32 (el tamaño del player), con píxeles solo en la mitad que corresponde a la capa y el resto transparente. Guardar como:
+1. **Arte**: dibujar el sheet horizontal en el canvas 20×32 (tamaño del player), con píxeles solo en la región de la capa y el resto transparente. Guardar como:
    ```
-   public/assets/sprites/player/player_<layer>_<state>.png
+   public/assets/sprites/player/player_legs_<state>.png
+   public/assets/sprites/player/player_torso_<action>[_<orientation>].png
+   public/assets/sprites/player/player_weapon_<type>_<orientation>.png
    ```
-   donde `<layer>` es `legs` o `torso` y `<state>` es el nombre del estado (e.g., `run`, `shoot`, `crouch`).
 
-2. **Registry**: añadir una entrada en `LEGS_DEFS` o `TORSO_DEFS` dentro de `src/gfx/playerSprite.ts`:
+2. **Registry**: añadir entrada en `LEGS_DEFS`, `TORSO_DEFS` o `WEAPON_DEFS` en `src/gfx/playerSprite.ts`:
    ```ts
-   // en LEGS_DEFS:
+   // LEGS_DEFS — un estado por entrada
    run: { url: '/assets/sprites/player/player_legs_run.png', frames: 8, fps: 12, loop: true },
-   // en TORSO_DEFS:
-   shoot: { url: '/assets/sprites/player/player_torso_shoot.png', frames: 4, fps: 16, loop: false },
+   // TORSO_DEFS — indexado por `<action>_<orientation>`
+   shoot_up: { url: '/assets/sprites/player/player_torso_shoot_up.png', frames: 4, fps: 16, loop: false },
+   // WEAPON_DEFS — indexado por `<type>_<orientation>`
+   shotgun_up: { url: '/assets/sprites/player/player_weapon_shotgun_up.png', frames: 1, fps: 1, loop: false },
    ```
 
-3. **Transición**: añadir el caso en `Player.selectLegsAnim()` o `Player.selectTorsoAnim()` en `src/entities/player.ts`. Los three.js one-shot del torso (`shoot`, `melee`, `throw`) ya están wired a los hooks `trigger*Anim(dur)` — main.ts los invoca cuando dispara el arma / da melee / lanza grenade.
+3. **Transición (solo para estados NUEVOS de legs o torso action)**:
+   - Nuevo estado de legs → caso en `Player.selectLegsAnim()`.
+   - Nueva `TorsoAction` → caso en `Player.selectTorsoAction()` + hook público si es one-shot.
+   - Nueva orientación no necesita caso — ya mapeadas a partir de `_aimAngle`.
+   - Nuevos weapons/orientations del arma se activan automáticamente al existir en `WEAPON_DEFS`; main.ts ya llama `player.setWeapon()` cada frame.
 
-Después: `npm run optimize:sprites` para comprimir el PNG antes de commit.
+Después: `npm run optimize:sprites` para comprimir los PNGs antes de commit.
 
-**Fallback durante producción**: si un sheet layered no existe aún, `getLegsAnim()` cae en cascada al `player_idle.png` legacy y `getTorsoAnim()` devuelve null (el torso mesh se oculta). El juego sigue jugable mientras se va construyendo el arte capa por capa.
+**Fallback durante producción**: sheets layered faltantes NO rompen el juego. La cascada es:
+- Legs: requested → `legs.idle` → legacy → empty.
+- Torso: `(action, orient)` → `(action, neutral)` → `(idle, neutral)` → legacy. En modo legacy, la capa weapon se oculta automáticamente (`isLegacy` guard, AD-048).
+- Weapon: `(type, orient)` → `(type, neutral)` → **null** (weaponMesh oculto).
+
+Lista completa de sheets con frames, FPS y prioridad en `public/assets/README.md`.
 
 ---
 

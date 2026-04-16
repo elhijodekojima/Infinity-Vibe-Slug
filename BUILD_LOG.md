@@ -716,3 +716,94 @@ Metal Slug tiene combinaciones de estados como `correr + disparar`, `saltar + di
 - Por cada sheet nuevo: drop en `public/assets/sprites/player/` con el nombre correcto, ajustar frames/fps en `DEFS` si difiere de la estimación, `npm run optimize:sprites`.
 
 ---
+
+### [2026-04-16] — Sistema de animación de 3 capas (weapon separada + aim vertical)
+
+**Estado general:** 🟢 verde
+**`tsc --noEmit`:** ✅ limpio
+**Cero regresiones visuales:** el fallback cascada preserva el render legacy hasta que drops de los nuevos sheets.
+**Aplica solo al personaje principal.**
+
+#### 🎯 Problema resuelto
+
+El sistema de 2 capas (legs + torso-con-todo) introducido ayer cubría el 80% de los casos, pero dejaba dos explosiones combinatorias pendientes:
+
+1. **Arma en el torso** → cada arma requería redibujar todas las poses de torso (4 acciones × 3 orient = 12 torsos × 4 armas = 48 sheets combinatorio).
+2. **Aim vertical en el torso** → apuntar arriba no cambia solo los brazos: cabeza y torso enteros rotan. El torso necesita variantes por orientación.
+
+#### ✅ Hecho
+
+**`src/gfx/playerSprite.ts` rewrite completo (3 registries con matrices y cascadas)**
+
+- Nuevos tipos públicos:
+  - `TorsoAction = 'idle' | 'shoot' | 'melee' | 'throw'`.
+  - `AimOrientation = 'neutral' | 'up' | 'down'`.
+  - `WeaponType = 'pistol' | 'machinegun' | 'shotgun' | 'rocket'`.
+  - `Animation.isLegacy: boolean` para que el consumidor detecte modo-legacy.
+- Registry matrices dispersas:
+  - `TORSO_DEFS: Partial<Record<"<action>_<orientation>", AnimDef>>` — 8 entradas definidas (los `melee_up`/`throw_down` etc se omiten y caen a neutral).
+  - `WEAPON_DEFS: Partial<Record<"<type>_<orientation>", AnimDef>>` — 12 entradas (4 armas × 3 orientaciones).
+- API nueva:
+  - `getTorsoAnim(action, orientation)`: devuelve `Animation` con cascada 4-step (exact → action_neutral → idle_neutral → legacy). Siempre retorna algo.
+  - `getWeaponAnim(type, orientation)`: devuelve `Animation | null` con cascada 3-step (exact → type_neutral → null). `null` = oculta weaponMesh.
+- `preloadAllAnimations()` carga 4 legs + 8 torso + 12 weapon + 1 legacy = 25 PNGs en paralelo, fail-open per AD-039.
+
+**`src/entities/player.ts` rewrite completo (3 meshes + 2D torso state)**
+
+- Nuevo `weaponMesh: Mesh` en el Group. Z-stack: legs (z=0) → torso (z=0.01) → weapon (z=0.02).
+- Estado del torso pasa a 2D: `_torsoAction: TorsoAction` + `_aimOrientation: AimOrientation`. Selectors separados:
+  - `selectTorsoAction()`: prioridad melee > throw > shoot > idle (por timers).
+  - `selectAimOrientation()`: `aimAngle > 1` → up, `< -1` → down, else neutral.
+  - Cuando CUALQUIERA cambia, `_torsoTime` resetea a 0.
+- Nuevo estado `_currentWeapon: WeaponType` + setter público `setWeapon(type)` idempotente.
+- `syncMesh()` ahora aplica 3 capas:
+  - legs: `getLegsAnim(_legsAnim)`.
+  - torso: `getTorsoAnim(_torsoAction, _aimOrientation)` — siempre visible.
+  - weapon: `getWeaponAnim(_currentWeapon, _aimOrientation)` — oculto si torso en modo legacy (via `torso.isLegacy`) O si retorna null.
+- `PLAYER.TORSO_CROUCH_Y_OFFSET` ahora se aplica a torsoMesh Y A weaponMesh (una constante cubre crouch × cualquier-torso × cualquier-arma).
+- `reset()` reinicializa las tres dimensiones de estado y los timers.
+
+**`src/main.ts` wiring**
+
+- `weaponLabelToType(label)` helper local convierte `'PISTOL'/'MACHINEGUN'/'SHOTGUN'/'ROCKET'` → `WeaponType`.
+- Cada frame del loop llama `player.setWeapon(weaponLabelToType(state.currentWeapon.label))`. Idempotente — solo un string assignment si cambia.
+- Tras `tryFire()` exitoso → `player.triggerShootAnim(0.2)`. El torso muestra la pose de disparo durante 0.2s.
+- Tras `tryMelee()` exitoso → `player.triggerMeleeAnim(MELEE.COOLDOWN)`.
+- Tras `tryThrowGrenade()` con `ok` → `player.triggerThrowAnim(0.35)`.
+
+**`src/config/balance.ts`** — sin cambios (la `TORSO_CROUCH_Y_OFFSET` añadida ayer ya sirve).
+
+**`public/assets/README.md` expandido**
+
+- Árbol completo de sheets layered con las 24 entradas esperadas + el legacy.
+- Tabla explicativa de responsabilidades por capa y el 2D del torso (action × orientation).
+- Tabla de fallback cascada por capa.
+- **Lista de compra completa** con frames/FPS/loop por sheet en 3 tablas (legs × 4, torso × 8, weapons × 12).
+- Orden de autoría prioritario para validación incremental (MVP: idle legs + idle torso + pistol neutral).
+- Reglas de anchor críticas: feet row fijo en legs, waist row fijo en torso, grip pixel fijo en weapon (sincronizado con hand pixel del torso).
+
+#### 🧠 Decisiones arquitectónicas
+
+- **AD-046 — Arma como capa independiente**. Mismo torso sirve para todas las armas. Swap de arma es sustitución de textura del weaponMesh, sin redibujar nada del torso.
+- **AD-047 — Torso como matriz (action × orientation)** con registry disperso. Evita autorear celdas sin sentido (ej. `melee_up`) gracias a la cascada `(action, orient) → (action, neutral) → (idle, neutral) → legacy`.
+- **AD-048 — `isLegacy` guard suprime weapon**. El legacy sheet ya contiene el arma; si el weaponMesh se renderizara encima saldrían dos armas. Flag `Animation.isLegacy` permite al Player comportarse correctamente en modo-legacy sin conocer estructuras globales.
+
+#### 🐞 Problemas / Bloqueos
+
+- **Shot ligeramente descuadrado** (reportado por el usuario): muzzleX/Y se calculan sobre el HITBOX (PLAYER.WIDTH=14, HEIGHT=28), mientras el SPRITE es mayor (SPRITE_W=34, SPRITE_H=35). El arma pintada en el sprite está a ~+12px del centro, las balas spawnean a +7.7. Desfase visible de 4–7 px. **No fix aún** — los sprites van a cambiar cuando lleguen los layered, recalibrar dos veces = trabajo perdido. Se ajusta en la misma pasada cuando los sheets de weapon + torso estén en disco.
+- Sin bloqueantes. Typecheck clean tras cada una de las 4 edits quirúrgicas en main.ts.
+
+#### 📏 Cifras
+
+- **Reducción combinatoria total**: 4 legs × 4 actions × 3 orientations × 4 weapons = 192 sheets combinatorio → 24 sheets layered. **~8× menos arte**.
+- **Reducción en torso**: 4 acciones × 3 orient × 4 armas = 48 torsos combinatorio → 8 torsos layered + 12 weapons = 20 sheets. **~2.4× menos solo en esa dimensión**.
+- `playerSprite.ts`: 200 líneas (antes layered v1) → 265 líneas. +65 para registries matriciales + cascadas.
+- `player.ts`: 325 líneas → 315 líneas. ~igual (3 meshes en vez de 2, pero los selectors son más simples).
+- `main.ts`: +30 líneas (helper + 3 llamadas a trigger*Anim + 1 setWeapon).
+
+#### ➡️ Siguiente paso
+
+- **Autoría de arte** — ver `public/assets/README.md` para la lista completa de 24 sheets con prioridades.
+- Orden sugerido: `legs_idle` + `torso_idle` + `weapon_pistol_neutral` → valida las 3 capas alineadas. Después `legs_run` (movimiento), `torso_shoot` (feedback de disparo), `torso_idle_up` + `weapon_pistol_up` (validación del matrix action × orientation).
+
+---

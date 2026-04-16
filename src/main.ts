@@ -31,6 +31,7 @@ import { Machinegun } from './entities/weapons/machinegun';
 import { Shotgun } from './entities/weapons/shotgun';
 import { RocketLauncher } from './entities/weapons/rocketLauncher';
 import type { Weapon } from './entities/weapons/weapon';
+import type { WeaponType } from './gfx/playerSprite';
 import { RocketPool, type RocketData } from './entities/rockets';
 import { ItemPool, type ItemType } from './entities/items/itemPool';
 import { HelicopterPool } from './entities/enemies/helicopterPool';
@@ -225,6 +226,21 @@ const state = {
 };
 
 const AOE_R2 = GRENADE.EXPLOSION_RADIUS * GRENADE.EXPLOSION_RADIUS;
+
+/**
+ * Map a Weapon's `.label` to the WeaponType enum expected by the
+ * Player's sprite layer (see playerSprite.ts). Kept as a local helper
+ * so we don't have to add a `type` field to the Weapon interface.
+ */
+function weaponLabelToType(label: string): WeaponType {
+  switch (label) {
+    case 'MACHINEGUN': return 'machinegun';
+    case 'SHOTGUN': return 'shotgun';
+    case 'ROCKET': return 'rocket';
+    case 'PISTOL':
+    default: return 'pistol';
+  }
+}
 
 /**
  * Reusable AABBs — avoid per-frame allocation in collision loops.
@@ -756,7 +772,9 @@ function tryMelee(): boolean {
     meleeCooldown = MELEE.COOLDOWN;
     // GDD/User: delay before shooting again after melee.
     state.shootDelay = MELEE.HOLSTER_DELAY;
-    return true; 
+    // Override the torso pose with the knife swing animation.
+    player.triggerMeleeAnim(MELEE.COOLDOWN);
+    return true;
   }
   return false;
 }
@@ -780,6 +798,8 @@ function tryThrowGrenade(): void {
   if (ok) {
     state.grenades--;
     state.grenadeCooldown = 1.5;
+    // Force the torso into the 'throw' animation for its duration.
+    player.triggerThrowAnim(0.35);
   }
 }
 
@@ -890,6 +910,10 @@ const loop = new Loop(
     background.update(dt, SCROLL.BASE_SPEED);
     player.update(dt, input, renderer.camera.right, terrainManager);
 
+    // Keep the player's weapon-sprite layer in sync with the currently
+    // equipped weapon. Idempotent — just a string assignment inside.
+    player.setWeapon(weaponLabelToType(state.currentWeapon.label));
+
     // --- Weapon / melee priority ---
     state.currentWeapon.tickCooldown(dt);
     meleeCooldown = Math.max(0, meleeCooldown - dt);
@@ -904,6 +928,8 @@ const loop = new Loop(
       if (!didMelee) {
         if (state.currentWeapon.tryFire(bullets, player.muzzleX, player.muzzleY, state.globalShotId, player.aimAngle)) {
           state.globalShotId++;
+          // Play the 'shoot' torso pose while the firing frames unfold.
+          player.triggerShootAnim(0.2);
         }
       }
     }
