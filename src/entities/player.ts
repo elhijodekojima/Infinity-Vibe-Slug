@@ -1,36 +1,53 @@
-import { Mesh, PlaneGeometry, MeshBasicMaterial } from 'three';
+import { Group, Mesh, PlaneGeometry, MeshBasicMaterial } from 'three';
 import { Input } from '../core/input';
 import { PLAYER, WORLD } from '../config/balance';
 import {
-  getAnimation,
+  getLegsAnim,
+  getTorsoAnim,
   preloadAllAnimations,
-  type PlayerAnim,
+  type Animation,
+  type LegsAnim,
+  type TorsoAnim,
 } from '../gfx/playerSprite';
 import type { AABB } from '../systems/collisions';
 import type { TerrainManager } from '../systems/terrain/terrainManager';
 
 /**
- * Player entity. Physics: horizontal move, jump with gravity, ground clamp.
- * Visuals: animated pixel-art sprite driven by a state-machine pairing one
- * of the named `PlayerAnim` states with a texture from the animation
- * registry (see `gfx/playerSprite.ts`).
+ * Player entity — layered animation edition.
  *
- * Exposes `x`, `y` (feet), `aabb`, and muzzle getters for weapons to spawn
- * bullets/grenades from.
+ * The visible character is a `Group` containing TWO Meshes on the same
+ * 20×32 quad, each with its own texture:
+ *   - `legsMesh`  → movement animations (idle / run / jump / crouch).
+ *   - `torsoMesh` → action animations (idle / shoot / aimUp / aimDown /
+ *                   throw / melee).
  *
- * Animation lifecycle:
- *   1. Every frame, `selectAnim()` picks the target state from physics +
- *      input (grounded/crouch/aimUp/run/idle/shoot).
- *   2. If the state changed, `_animTime` resets to 0 — the animation plays
- *      from frame 0.
- *   3. `syncMesh()` looks up the current Animation, swaps the material's
- *      texture if it differs, and sets `texture.offset.x` to expose the
- *      right frame.
- *   4. Sprites missing from `public/` fall back to `idle` safely (see
- *      `getAnimation()` in the sprite module).
+ * Both layers run independent state machines (`_legsAnim` + `_legsTime`,
+ * `_torsoAnim` + `_torsoTime`). Per-frame, `selectLegsAnim()` and
+ * `selectTorsoAnim()` pick the target state from physics/input; when a
+ * state changes, its timer resets to 0 and the animation restarts.
+ *
+ * ALIGNMENT: every sprite frame in both layers is authored on the same
+ * full-body canvas with transparent padding for the "other" layer. Both
+ * Meshes sit at (0,0,0) within the Group so their textures overlay
+ * automatically — no anchor math per frame.
+ *
+ * CROUCH SYNC: the one case where layers need coupling. When
+ * `_isCrouching` is true, the torso mesh Y is shifted by
+ * `PLAYER.TORSO_CROUCH_Y_OFFSET` so the drawn torso lines up with the
+ * folded-leg hips of the crouch-legs sheet. One offset covers every
+ * crouch+torso combination — no combinatorial sheets required.
+ *
+ * MIGRATION: while layered PNGs don't exist yet, `getLegsAnim()` falls
+ * back to the legacy `player_idle.png` and `getTorsoAnim()` returns null
+ * (torso mesh becomes invisible). Result: current visual stays identical
+ * until layered sheets are dropped in — each new PNG activates progressively.
  */
 export class Player {
-  public readonly mesh: Mesh;
+  /** Scene node. Add this to the scene; it contains both layer meshes. */
+  public readonly mesh: Group;
+
+  private readonly legsMesh: Mesh;
+  private readonly torsoMesh: Mesh;
 
   private _x: number = PLAYER.START_X;
   private _y: number = WORLD.GROUND_Y;
@@ -42,12 +59,18 @@ export class Player {
   /** Current aiming angle in radians. 0 = Forward, PI/2 = Up, -PI/2 = Down. */
   private _aimAngle = 0;
 
-  /** Currently-playing animation state name. */
-  private _currentAnim: PlayerAnim = 'idle';
-  /** Seconds since `_currentAnim` started — drives the frame index. */
-  private _animTime = 0;
-  /** While > 0, forces the 'shoot' animation regardless of other state. */
+  // ---- Layered animation state ----
+  private _legsAnim: LegsAnim = 'idle';
+  private _legsTime = 0;
+  private _torsoAnim: TorsoAnim = 'idle';
+  private _torsoTime = 0;
+
+  /** While > 0, forces the torso into 'shoot' regardless of other state. */
   private _shootAnimTimer = 0;
+  /** While > 0, forces the torso into 'melee'. */
+  private _meleeAnimTimer = 0;
+  /** While > 0, forces the torso into 'throw'. */
+  private _throwAnimTimer = 0;
 
   /** Reused AABB — updated per-frame, not re-allocated. */
   private readonly _aabb: AABB = {
@@ -58,20 +81,34 @@ export class Player {
   };
 
   constructor() {
-    // Sprite quad is larger than the collision box for a forgiving hitbox
-    // (see AD-017). UV repeat / filters / colorSpace are managed by the
-    // sprite module — don't touch them here.
+    // Build both layer meshes on the same quad. Texture repeat/filter are
+    // managed inside the sprite module (AD-038) — do not touch here.
     const geom = new PlaneGeometry(PLAYER.SPRITE_W, PLAYER.SPRITE_H);
-    const idle = getAnimation('idle');
-    const mat = new MeshBasicMaterial({
-      map: idle.texture,
+    const legsInitial = getLegsAnim('idle');
+    const legsMat = new MeshBasicMaterial({
+      map: legsInitial.texture,
       transparent: false,
       alphaTest: 0.5,
     });
-    this.mesh = new Mesh(geom, mat);
+    const torsoMat = new MeshBasicMaterial({
+      map: legsInitial.texture, // placeholder until preload resolves
+      transparent: false,
+      alphaTest: 0.5,
+    });
+    this.legsMesh = new Mesh(geom, legsMat);
+    this.torsoMesh = new Mesh(geom, torsoMat);
+    // Torso renders on top of legs.
+    this.torsoMesh.position.z = 0.01;
+    // Until preload finishes, hide torso — legs will show the legacy sheet.
+    this.torsoMesh.visible = false;
 
-    // Hide until all animation PNGs have attempted to load. This protects
-    // against rendering a blank quad on the first frame.
+    this.mesh = new Group();
+    this.mesh.add(this.legsMesh);
+    this.mesh.add(this.torsoMesh);
+
+    // Hide whole group until any animation decodes. The fallback chain in
+    // the sprite module means once the legacy sheet loads, the group can
+    // already render legs+hidden-torso (legacy look).
     this.mesh.visible = false;
     preloadAllAnimations()
       .then(() => { this.mesh.visible = true; })
@@ -83,6 +120,8 @@ export class Player {
 
     this.syncMesh();
   }
+
+  // ---------- Public accessors ----------
 
   /** Feet X (world units). */
   get x(): number { return this._x; }
@@ -100,6 +139,8 @@ export class Player {
 
   get isCrouching(): boolean { return this._isCrouching; }
   get aimAngle(): number { return this._aimAngle; }
+  get currentLegsAnim(): LegsAnim { return this._legsAnim; }
+  get currentTorsoAnim(): TorsoAnim { return this._torsoAnim; }
 
   /** World position where bullets spawn. Shifts for crouching/aiming. */
   get muzzleX(): number {
@@ -117,15 +158,24 @@ export class Player {
     return this._y + baseH;
   }
 
-  /**
-   * Force the 'shoot' animation to play for `durationSec` seconds. Main.ts
-   * calls this when a weapon actually fires so the pose overrides the
-   * default idle/run state. If the 'shoot' PNG isn't present yet, the
-   * animation registry falls back to idle — no crash, no blank frame.
-   */
+  // ---------- Animation hooks (called by main.ts when events occur) ----------
+
+  /** Force the torso into 'shoot' for `durationSec` seconds. */
   triggerShootAnim(durationSec: number): void {
     this._shootAnimTimer = durationSec;
   }
+
+  /** Force the torso into 'melee' for `durationSec` seconds. */
+  triggerMeleeAnim(durationSec: number): void {
+    this._meleeAnimTimer = durationSec;
+  }
+
+  /** Force the torso into 'throw' for `durationSec` seconds. */
+  triggerThrowAnim(durationSec: number): void {
+    this._throwAnimTimer = durationSec;
+  }
+
+  // ---------- Main tick ----------
 
   update(dt: number, input: Input, maxX: number, terrain: TerrainManager): void {
     const down = input.isDown('down');
@@ -164,6 +214,7 @@ export class Player {
     this._x += vx * dt;
 
     // Face the direction of last movement (sticky: no flip while idle).
+    // Flipping the Group flips both child meshes uniformly.
     if (vx !== 0) this.mesh.scale.x = vx < 0 ? -1 : 1;
 
     // Clamp to screen horizontally.
@@ -199,14 +250,25 @@ export class Player {
       this.grounded = false;
     }
 
-    // --- Animation state machine ---
+    // --- Decay per-action timers before picking torso state ---
     this._shootAnimTimer = Math.max(0, this._shootAnimTimer - dt);
-    const nextAnim = this.selectAnim(vx);
-    if (nextAnim !== this._currentAnim) {
-      this._currentAnim = nextAnim;
-      this._animTime = 0;
+    this._meleeAnimTimer = Math.max(0, this._meleeAnimTimer - dt);
+    this._throwAnimTimer = Math.max(0, this._throwAnimTimer - dt);
+
+    // --- Layered animation state machines ---
+    const nextLegs = this.selectLegsAnim(vx);
+    if (nextLegs !== this._legsAnim) {
+      this._legsAnim = nextLegs;
+      this._legsTime = 0;
     }
-    this._animTime += dt;
+    this._legsTime += dt;
+
+    const nextTorso = this.selectTorsoAnim();
+    if (nextTorso !== this._torsoAnim) {
+      this._torsoAnim = nextTorso;
+      this._torsoTime = 0;
+    }
+    this._torsoTime += dt;
 
     this.syncMesh();
   }
@@ -218,48 +280,88 @@ export class Player {
     this.grounded = true;
     this._isCrouching = false;
     this._aimAngle = 0;
-    this._currentAnim = 'idle';
-    this._animTime = 0;
+    this._legsAnim = 'idle';
+    this._legsTime = 0;
+    this._torsoAnim = 'idle';
+    this._torsoTime = 0;
     this._shootAnimTimer = 0;
+    this._meleeAnimTimer = 0;
+    this._throwAnimTimer = 0;
     this.syncMesh();
   }
 
+  // ---------- Selectors ----------
+
   /**
-   * Decide which animation to play this frame, in priority order:
-   *   shoot (while timer > 0) > airborne (jump) > crouch > aim up > run > idle.
-   * Aim-up wins over run (standing still while pointing up is the expected
-   * pose); if we ever want "run + aim up" we can add a combined state.
+   * Movement-driven animation. Priority:
+   *   airborne → jump
+   *   crouching → crouch
+   *   moving → run
+   *   else → idle
    */
-  private selectAnim(vx: number): PlayerAnim {
-    if (this._shootAnimTimer > 0) return 'shoot';
+  private selectLegsAnim(vx: number): LegsAnim {
     if (!this.grounded) return 'jump';
     if (this._isCrouching) return 'crouch';
-    if (this._aimAngle > 1.0) return 'aimUp';
     if (vx !== 0) return 'run';
     return 'idle';
   }
 
+  /**
+   * Action-driven animation. Priority order:
+   *   triggered one-shot (shoot/melee/throw, while timer > 0) >
+   *   aimUp (W held, ground or air) > aimDown (S held in air) > idle.
+   * When aimDown+aimUp collide in the air, the input layer forces the
+   * angle to one extreme — we mirror that here by checking aimAngle.
+   */
+  private selectTorsoAnim(): TorsoAnim {
+    if (this._meleeAnimTimer > 0) return 'melee';
+    if (this._throwAnimTimer > 0) return 'throw';
+    if (this._shootAnimTimer > 0) return 'shoot';
+    if (this._aimAngle > 1.0) return 'aimUp';
+    if (this._aimAngle < -1.0) return 'aimDown';
+    return 'idle';
+  }
+
+  // ---------- Rendering ----------
+
   private syncMesh(): void {
-    const anim = getAnimation(this._currentAnim);
-    const mat = this.mesh.material as MeshBasicMaterial;
-
-    // Swap texture if the animation changed (or if fallback returned a
-    // different one this frame because the PNG just finished loading).
-    if (mat.map !== anim.texture) {
-      mat.map = anim.texture;
-      mat.needsUpdate = true;
-    }
-
-    // Advance the frame. Looping anims wrap; non-looping clamp to last frame.
-    const { frames, fps, loop } = anim.def;
-    const raw = Math.floor(this._animTime * fps);
-    const frame = loop ? raw % frames : Math.min(raw, frames - 1);
-    anim.texture.offset.x = frame / frames;
-
+    // Anchor the whole group at the player's world position.
     this.mesh.position.set(
       this._x + PLAYER.SPRITE_OFFSET_X,
-      this._y + (PLAYER.SPRITE_H / 2) + PLAYER.SPRITE_OFFSET_Y,
+      this._y + PLAYER.SPRITE_H / 2 + PLAYER.SPRITE_OFFSET_Y,
       0,
     );
+
+    // Legs layer — always visible (either the layered sheet or the legacy
+    // full-body fallback through getLegsAnim).
+    const legs = getLegsAnim(this._legsAnim);
+    applyLayer(this.legsMesh, legs, this._legsTime);
+
+    // Torso layer — may be null during migration (no torso sheets yet).
+    const torso = getTorsoAnim(this._torsoAnim);
+    if (torso) {
+      this.torsoMesh.visible = true;
+      applyLayer(this.torsoMesh, torso, this._torsoTime);
+      // Crouch sync: shift torso down so it rests on folded legs hips.
+      this.torsoMesh.position.y = this._isCrouching ? PLAYER.TORSO_CROUCH_Y_OFFSET : 0;
+    } else {
+      this.torsoMesh.visible = false;
+    }
   }
+}
+
+/**
+ * Apply one Animation's texture + current frame offset to a Mesh.
+ * Swaps `material.map` only when it changed so we don't flag extra uploads.
+ */
+function applyLayer(mesh: Mesh, anim: Animation, animTime: number): void {
+  const mat = mesh.material as MeshBasicMaterial;
+  if (mat.map !== anim.texture) {
+    mat.map = anim.texture;
+    mat.needsUpdate = true;
+  }
+  const { frames, fps, loop } = anim.def;
+  const raw = Math.floor(animTime * fps);
+  const frame = loop ? raw % frames : Math.min(raw, frames - 1);
+  anim.texture.offset.x = frame / frames;
 }

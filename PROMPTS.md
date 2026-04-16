@@ -33,6 +33,29 @@
 
 ---
 
+### [2026-04-16] — P08 · Sistema de animación layered (legs + torso) para el Player
+**Objetivo:** Diseñar e implementar un sistema modular de animación por capas para el personaje principal que evite la explosión combinatoria de sheets full-body (N×M → N+M). Dos capas independientes (`legs` para movimiento, `torso` para acciones) con state machines separadas y un Group de Three.js que las superpone. Solo aplica al Player; enemigos siguen con sheets tradicionales.
+**Modelo:** Claude Opus 4.6 (1M context)
+**Archivo(s) afectado(s):**
+- Rewrite: `src/gfx/playerSprite.ts` (`LegsAnim`/`TorsoAnim` unions + `LEGS_DEFS`/`TORSO_DEFS` records + `getLegsAnim`/`getTorsoAnim` API + legacy fallback).
+- Rewrite: `src/entities/player.ts` (`Group` + `legsMesh` + `torsoMesh` + dual state machines + `selectLegsAnim`/`selectTorsoAnim` + hooks `triggerShootAnim`/`triggerMeleeAnim`/`triggerThrowAnim`).
+- Modified: `src/config/balance.ts` (+`PLAYER.TORSO_CROUCH_Y_OFFSET`).
+- Docs: `public/assets/README.md` (layout + reglas de autoría layered), `MEMORY.md` (+AD-044, +AD-045, PASO 12 en estado actual, sección "cómo añadir animación" reescrita para 2 capas), `BUILD_LOG.md` (entry 2026-04-16).
+
+**Prompt:**
+> Necesito que diseñes e implementes un sistema de animación para el personaje principal de un videojuego 2D tipo run'n'gun inspirado en Metal Slug, con un enfoque modular por capas. [...] separación del personaje en al menos dos partes independientes: parte inferior del cuerpo (piernas) y parte superior (torso y brazos). [...] Aplicar exclusivamente al personaje principal.
+
+**Resultado:** ✅ merged (`tsc --noEmit` limpio).
+**Notas:**
+- **Cero cambios de comportamiento observables** respecto al estado previo: fallback legacy mantiene el player visible con el `player_idle.png` existente hasta que se drops sheets layered. Typecheck + render visual confirman.
+- 10 sheets totales vs 24 de la aproximación combinatoria. 4 × legs + 6 × torso vs 4 × 6.
+- Canvas 20×32 full-body con padding transparente → alineación automática (sin anchor math). Convención crítica para el artista: **feet fijos en legs, waist fija en torso**.
+- Crouch sync: UNA constante (`TORSO_CROUCH_Y_OFFSET = -8`) cubre crouch+idle, crouch+shoot, crouch+aimUp, crouch+melee, etc. Eliminé el problema del "crouch torso combinatorial" con un shift Y.
+- Hooks `trigger*Anim(dur)` desacoplan el "qué pasó" (main.ts sabe cuando dispara un arma) del "cómo animar" (player.ts decide el frame).
+- Backward-compat: `player.mesh` ahora es un `Group` en lugar de un `Mesh`. `scene.add(player.mesh)` sigue funcionando (Group es un Object3D). Main.ts no requiere cambios.
+
+---
+
 ### [2026-04-15] — P07 · Cleanup session: type safety, animation registry, collision helpers, docs
 **Objetivo:** Limpiar el código sin cambiar comportamiento antes de continuar añadiendo animaciones. 4 fases ejecutadas en orden: (1) eliminar `any` en fronteras de módulo, (2) registry de animaciones extensible en `playerSprite.ts` + state machine en `player.ts`, (3) extraer helpers de colisión en `main.ts` para deduplicar las 4 variantes (bullet/rocket × ground/helicopter), (4) consolidación documental.
 **Modelo:** Claude Opus 4.6 (1M context)

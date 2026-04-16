@@ -113,6 +113,21 @@
 **Decisión:** Todo parámetro de función cruzando módulos tiene su tipo formal. `TerrainManager`, `HelicopterPool` y `EnemyPool` se importan con `import type` cuando solo se usan como tipo.
 **Razón:** TypeScript atrapa bugs antes de runtime (ej. método renombrado en TerrainManager detecta los callsites). Autocompletado funciona en el IDE. El coste es un `import type` extra por archivo.
 
+### AD-043 — Helpers de colisión en main.ts con mutación compartida
+**Fecha:** 2026-04-15
+**Decisión:** Los helpers `bulletVsGroundPool`, `bulletVsHelicopters`, `rocketVsGroundPool`, `rocketVsHelicopters`, `detonateRocket` viven en `main.ts` y mutan directamente `state.score`, `bullets`, `rockets`, `explosions`. Contrato: devuelven `boolean consumed` para que el orquestador corte el procesamiento del proyectil. No son módulo reutilizable.
+**Razón:** Separarlos a un módulo externo requeriría pasar `state` + 5 pools como parámetros (ruido). Una vez `main.ts` se divida en múltiples archivos, se formalizará el contrato.
+
+### AD-044 — Animación del player por CAPAS (legs + torso) — solo personaje principal
+**Fecha:** 2026-04-16
+**Decisión:** El sprite del jugador se divide en DOS capas independientes (`legsMesh` + `torsoMesh`), cada una con su propia Textura, animación y state machine. Legs expresa movimiento (`idle`/`run`/`jump`/`crouch`), Torso expresa acción (`idle`/`shoot`/`aimUp`/`aimDown`/`throw`/`melee`). Las capas se renderizan en el mismo punto del mundo dentro de un `Group`. Ambos sheets son full-body 20×32 con padding transparente para la mitad que no les toca (cero anchor math). Crouch sincroniza las dos capas vía un Y-offset fijo (`PLAYER.TORSO_CROUCH_Y_OFFSET`) aplicado solo al torso. Enemigos y otros elementos NO usan este sistema — mantienen sheets full-body tradicionales.
+**Razón:** Evita la explosión combinatoria de animaciones completas (run+shoot, jump+shoot, crouch+aimUp, crouch+shoot...). Añadir una animación nueva = 1 entrada en `LEGS_DEFS` o `TORSO_DEFS` + 1 PNG + 1 case en `selectLegsAnim()` o `selectTorsoAnim()`. Con N estados de legs × M estados de torso, N+M sheets en lugar de N×M. Migración no-rompedora: si una capa no tiene sheet layered, fallback en cascada → legs muestra `player_idle.png` legacy y torso se oculta.
+
+### AD-045 — Hooks `trigger*Anim(dur)` para animaciones one-shot
+**Fecha:** 2026-04-16
+**Decisión:** El torso tiene tres estados one-shot (`shoot`, `melee`, `throw`) que deben reproducirse cuando ocurre un evento discreto de juego, no cuando un input se mantiene. El Player expone `triggerShootAnim(dur)`, `triggerMeleeAnim(dur)`, `triggerThrowAnim(dur)` como métodos públicos. Main.ts los invoca cuando el arma dispara / melee hit / grenade throw. Cada hook enciende un timer interno; `selectTorsoAnim()` prioriza el timer > 0 sobre cualquier otro estado.
+**Razón:** Desacopla el "qué pasó" (main.ts lo sabe) del "cómo animar" (player.ts lo decide). Evita polluir el player con referencias a sistemas externos. Duración configurable por caller: shoot típicamente 0.15s, melee 0.25s, throw 0.35s.
+
 ---
 
 ## 📁 Estructura de carpetas (estado real al 2026-04-15)
@@ -246,29 +261,40 @@ infinity-vibe-slug/
 - ✅ PASO 8: Sistema de Obstáculos Procedurales y Terreno Dinámico.
 - ✅ PASO 9: Combat Context Layer, Helicópteros (Enemigos Aéreos) y Sistema de Pausa.
 - ✅ PASO 10: **Integración de la primera animación del Player** (`player_idle.png`, 6 frames) + pipeline de optimización PNG (`npm run optimize:sprites`).
-- ✅ PASO 11: **Limpieza de código y docs** — tipado estricto (cero `any` cruzando módulos), registry de animaciones extensible (`PlayerAnim` union + fallback a `idle`), índice AD actualizado, file tree sincronizado con realidad.
-- 🚧 **Work in Progress:** Animaciones adicionales del Player (run / shoot / jump / crouch / aimUp) — arte pendiente, el registry ya las espera con fallback.
+- ✅ PASO 11: **Limpieza de código y docs** — tipado estricto (cero `any` cruzando módulos), registry de animaciones extensible + fallback a `idle`, índice AD actualizado, file tree sincronizado con realidad.
+- ✅ PASO 12: **Sistema de animación layered** (AD-044) — player dividido en legs + torso con state machines independientes, `Group` con 2 Meshes superpuestos, fallback legacy para migración progresiva. Evita explosión combinatoria (N+M vs N×M sheets).
+- 🚧 **Work in Progress:** Arte de las capas layered (4 sheets de legs + 6 sheets de torso) — pendiente del usuario. Mientras tanto el juego usa el `player_idle.png` legacy como fallback en la capa legs.
 - ⏸️ **Pendiente:** SFX (Web Audio API), sprites pixel-art para enemigos (actualmente generados proceduralmente), menús/HUD finales, deploy a Vercel, snippet para el Google Form.
 
 ---
 
-## 🎯 Cómo añadir una nueva animación del player
+## 🎯 Cómo añadir una nueva animación del player (sistema layered, AD-044)
 
-Con el registry de AD-040, el flujo es **3 pasos**:
+El sprite del player tiene **dos capas independientes**: legs (piernas) y torso (cuerpo + brazos + arma). Cada animación vive SOLO en una de las dos.
 
-1. **Arte**: dibujar una sprite sheet horizontal de N frames y guardarla como `public/assets/sprites/player/player_<nombre>.png`.
-2. **Registry**: añadir una entrada en `DEFS` dentro de `src/gfx/playerSprite.ts`:
-   ```ts
-   run: { url: '/assets/sprites/player/player_run.png', frames: 8, fps: 12, loop: true },
+**Decide la capa primero**: si la animación afecta el movimiento del cuerpo (correr, saltar, agacharse) → `legs`. Si afecta pose de brazos/arma (disparar, apuntar, lanzar, cuchillear) → `torso`.
+
+Luego el flujo es **3 pasos**:
+
+1. **Arte**: dibujar el sheet horizontal en el canvas 20×32 (el tamaño del player), con píxeles solo en la mitad que corresponde a la capa y el resto transparente. Guardar como:
    ```
-3. **Transición**: añadir el caso en `Player.selectAnim()` en `src/entities/player.ts`:
+   public/assets/sprites/player/player_<layer>_<state>.png
+   ```
+   donde `<layer>` es `legs` o `torso` y `<state>` es el nombre del estado (e.g., `run`, `shoot`, `crouch`).
+
+2. **Registry**: añadir una entrada en `LEGS_DEFS` o `TORSO_DEFS` dentro de `src/gfx/playerSprite.ts`:
    ```ts
-   if (vx !== 0) return 'run';
+   // en LEGS_DEFS:
+   run: { url: '/assets/sprites/player/player_legs_run.png', frames: 8, fps: 12, loop: true },
+   // en TORSO_DEFS:
+   shoot: { url: '/assets/sprites/player/player_torso_shoot.png', frames: 4, fps: 16, loop: false },
    ```
 
-Después ejecutar `npm run optimize:sprites` para comprimir el PNG antes de commit.
+3. **Transición**: añadir el caso en `Player.selectLegsAnim()` o `Player.selectTorsoAnim()` en `src/entities/player.ts`. Los three.js one-shot del torso (`shoot`, `melee`, `throw`) ya están wired a los hooks `trigger*Anim(dur)` — main.ts los invoca cuando dispara el arma / da melee / lanza grenade.
 
-Si el PNG no existe en el server, `getAnimation()` hace fallback automático a `idle` — el juego no peta durante el desarrollo del arte.
+Después: `npm run optimize:sprites` para comprimir el PNG antes de commit.
+
+**Fallback durante producción**: si un sheet layered no existe aún, `getLegsAnim()` cae en cascada al `player_idle.png` legacy y `getTorsoAnim()` devuelve null (el torso mesh se oculta). El juego sigue jugable mientras se va construyendo el arte capa por capa.
 
 ---
 

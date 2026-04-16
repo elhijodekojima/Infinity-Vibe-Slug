@@ -36,6 +36,15 @@ export const PLAYER = {
    * correct — any negative value sinks the character into the floor.
    */
   SPRITE_OFFSET_Y: 0,
+  /**
+   * Layered animation: vertical shift (world units) applied to the torso
+   * layer mesh when the player is crouching. Negative = down. Keeps the
+   * torso visually resting on the folded legs of the `legs_crouch` sheet.
+   * One offset covers every crouch+torso combination (crouch+idle,
+   * crouch+shoot, crouch+aimUp, ...). Adjust empirically to match the
+   * hip row of the `legs_crouch` frames. 0 disables the shift.
+   */
+  TORSO_CROUCH_Y_OFFSET: -8,
   /** Horizontal move speed in world units / second. */
   MOVE_SPEED: 90,
   /** Speed while crouching (halved). */

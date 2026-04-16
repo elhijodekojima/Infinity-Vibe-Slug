@@ -636,3 +636,83 @@
 - Orden sugerido: **run** (visible siempre que te muevas) → **jump** (el más simple, 1 frame) → **shoot** (con wiring) → **crouch** (corto loop) → **aimUp** (1 frame pose).
 
 ---
+
+### [2026-04-16] — Sistema de animación layered (legs + torso) para el Player
+
+**Estado general:** 🟢 verde
+**`tsc --noEmit`:** ✅ limpio
+**Aplica solo al personaje principal.** Enemigos y otros elementos siguen con sheets full-body tradicionales.
+
+#### 🎯 Problema resuelto
+
+Metal Slug tiene combinaciones de estados como `correr + disparar`, `saltar + disparar`, `agacharse + apuntar arriba`, etc. Si cada combinación fuese un sheet completo, con 4 estados de movimiento × 6 estados de acción → 24 sheets. Inviable para mantener (y el arte es el recurso más caro del proyecto).
+
+#### ✅ Hecho
+
+**`src/gfx/playerSprite.ts` rewrite completo (layered registry)**
+
+- **Dos registries separados**:
+  - `LegsAnim = 'idle' | 'run' | 'jump' | 'crouch'` → `LEGS_DEFS` (4 entradas).
+  - `TorsoAnim = 'idle' | 'shoot' | 'aimUp' | 'aimDown' | 'throw' | 'melee'` → `TORSO_DEFS` (6 entradas).
+  - Total: **10 sheets** vs **24** de la aproximación combinatoria. -58%.
+- **API pública**:
+  - `getLegsAnim(name): Animation` — con fallback cascada (requested → legs.idle → legacy full-body → slot vacío).
+  - `getTorsoAnim(name): Animation | null` — devuelve `null` cuando no hay sheet disponible (caller oculta el torso mesh).
+  - `preloadAllAnimations(): Promise<void>` — kick off de todos los sheets (ambos registries + legacy) en paralelo. Resuelve cuando TODOS han terminado (loaded o fallado).
+- **Legacy bridge**: `LEGACY_DEF` apunta al `player_idle.png` existente. Cuando los sheets layered aún no existen, `getLegsAnim()` lo devuelve y el torso se oculta → el juego se ve exactamente como antes del refactor.
+- **Fail-open preservado** (AD-039): si un PNG da 404, `console.warn` + resolve silenciosamente. Nunca rechaza la Promise.
+
+**`src/entities/player.ts` rewrite completo (dual state machine)**
+
+- **Estructura visual**: `Group` contiene `legsMesh` + `torsoMesh`. Ambos `PlaneGeometry(20, 32)` (mismo tamaño que el player). `torsoMesh.position.z = 0.01` para que renderice encima de legs (evita z-fighting).
+- **Dos state machines independientes**:
+  - `_legsAnim: LegsAnim` + `_legsTime: number`.
+  - `_torsoAnim: TorsoAnim` + `_torsoTime: number`.
+  - Cada uno se resetea a 0 cuando su capa cambia de estado.
+- **Selectores separados**:
+  - `selectLegsAnim(vx)`: airborne → jump; crouching → crouch; moving → run; else idle.
+  - `selectTorsoAnim()`: prioridad descendente melee > throw > shoot (los 3 por timer trigger) > aimUp (aimAngle>1) > aimDown (aimAngle<-1) > idle.
+- **Hooks públicos** para one-shots (AD-045):
+  - `triggerShootAnim(dur)`, `triggerMeleeAnim(dur)`, `triggerThrowAnim(dur)`.
+  - Main.ts los invocará en los events correspondientes (wiring lo harán ellos cuando lo quieran).
+- **Crouch sync** (la única coupling entre capas): cuando `_isCrouching`, el torso mesh se desplaza verticalmente por `PLAYER.TORSO_CROUCH_Y_OFFSET` (-8 world units) para "pegar" el torso a las caderas plegadas. Una constante cubre TODAS las combinaciones crouch+torso — cero sheets dedicados.
+- **Facing direction**: `mesh.scale.x = -1` aplica al Group entero → ambos meshes se flipean uniformemente. Gratis.
+- **Backward-compat con main.ts**: `player.mesh` sigue existiendo (ahora es un `Group`). `scene.add(player.mesh)` funciona igual. No hay que tocar main.ts.
+
+**`src/config/balance.ts`** — nueva constante `PLAYER.TORSO_CROUCH_Y_OFFSET = -8`.
+
+**`public/assets/README.md`** — documenta la convención:
+- Layout de carpetas actualizado con `player_legs_*.png` + `player_torso_*.png` + el `player_idle.png` como legacy.
+- Sección completa sobre el sistema layered (por qué, cómo autorear, reglas de anchor).
+- Convención crítica: **feet fijos en todos los `legs_*`, waist fija en todos los `torso_*`**. Misalignments entre frames de la misma capa → jitter; misalignment entre capas → torso flotando/hundido.
+
+#### 🧠 Decisiones arquitectónicas
+
+- **AD-044 — Animación layered solo para Player.** Dos Meshes, dos state machines, canvas 20×32 con padding transparente en la mitad "ajena" → alineación automática. Enemigos y otros elementos siguen con sheets full-body (su combinatoria es baja y son menos importantes visualmente).
+- **AD-045 — `trigger*Anim(dur)` como hooks públicos.** Los three estados one-shot del torso (shoot/melee/throw) no pueden deducirse de inputs actuales — son eventos discretos. Main.ts los dispara, Player los anima. Evita polluir el player con knowledge de sistemas externos (armas, grenades, melee system).
+
+#### 🐞 Problemas / Bloqueos
+
+- Build primer typecheck falló: `PLAYER.TORSO_CROUCH_Y_OFFSET` no existía aún en balance.ts. Fix inmediato — reordenamiento de edits.
+- Edit de `balance.ts` inicial falló porque el comentario exacto de `SPRITE_OFFSET_Y` había cambiado (el linter/usuario lo había editado). Fix: anchor más pequeño (`SPRITE_OFFSET_Y: 0,\n  /** ...`) y se encontró.
+- Primer render tras el cambio: torso invisible (sheets layered no existen aún). **Esperado** — es el fallback legacy trabajando.
+
+#### 📏 Cifras
+
+- `playerSprite.ts`: 110 líneas (antes) → 175 líneas (ahora). +65 líneas para soportar dos registries + fallback en cascada + legacy bridge.
+- `player.ts`: 250 líneas (antes) → 325 líneas (ahora). +75 líneas por state machines duales y selectores separados.
+- **Complexity budget per-animation**: antes ~3 líneas de código por nueva animación; ahora ~3 líneas también (la API quedó igualmente ergonómica, solo dentro del registry correcto).
+
+#### ➡️ Siguiente paso
+
+- Autoría del arte **capa por capa**. Orden sugerido:
+  1. **`torso_idle`** — el más importante: con este + el legacy legs el personaje ya se ve "completo" en reposo.
+  2. **`legs_run`** — desbloquea la sensación de movimiento.
+  3. **`torso_shoot`** — wiring: main.ts llama `player.triggerShootAnim(0.15)` cuando cualquier arma dispara.
+  4. **`legs_jump`** + **`legs_crouch`** — 1 frame cada uno, fácil.
+  5. **`torso_aimUp`** / **`torso_aimDown`** — 1 frame de pose.
+  6. **`torso_throw`** + **`torso_melee`** — con hooks `triggerThrowAnim`/`triggerMeleeAnim` (pendiente wiring en main.ts cuando exista arte).
+
+- Por cada sheet nuevo: drop en `public/assets/sprites/player/` con el nombre correcto, ajustar frames/fps en `DEFS` si difiere de la estimación, `npm run optimize:sprites`.
+
+---
