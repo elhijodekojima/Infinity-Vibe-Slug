@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Infinity Vibe Slug - Sprite Extractor & Scaler</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            padding: 20px;
+            background: #222;
+            color: white;
+        }
+
+        .box {
+            border: 1px solid #444;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            background: #333;
+        }
+
+        canvas {
+            border: 1px solid #555;
+            background: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="5" height="5" fill="%23444"/><rect x="5" y="5" width="5" height="5" fill="%23444"/></svg>');
+        }
+
+        button {
+            padding: 10px 15px;
+            background: #4caf50;
+            color: white;
+            border: none;
+            cursor: pointer;
+            border-radius: 4px;
+        }
+
+        button:hover {
+            background: #45a049;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>🛠️ Extractor de Sprites (AIGODMODE -> Infinity-Vibe-Slug)</h1>
+
+    <div class="box">
+        <h3>1. Carga la Imagen (diego_run.png)</h3>
+        <input type="file" id="imgInput" accept="image/png">
+    </div>
+
+    <div class="box">
+        <h3>2. Carga el JSON de Bounding Boxes</h3>
+        <input type="file" id="jsonInput" accept="application/json">
+    </div>
+
+    <button id="processBtn">Recortar, Escalar a 20x32 y Generar Strip</button>
+
+    <div class="box" style="margin-top: 20px; overflow-x: auto;">
+        <h3>Resultado Final (Click derecho -> Guardar imagen como...)</h3>
+        <canvas id="outCanvas"></canvas>
+    </div>
+
+    <script>
+        let img = new Image();
+        let bboxData = null;
+
+        document.getElementById('imgInput').addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                const url = URL.createObjectURL(file);
+                img.src = url;
+            }
+        });
+
+        document.getElementById('jsonInput').addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = (evt) => {
+                    bboxData = JSON.parse(evt.target.result);
+                };
+                reader.readAsText(file);
+            }
+        });
+
+        document.getElementById('processBtn').addEventListener('click', () => {
+            if (!img.src || !bboxData) {
+                alert("Por favor, carga tanto la imagen como el JSON.");
+                return;
+            }
+
+            // Ordenar por col y row si no vienen bien, aunque suele venir en orden.
+            bboxData.sort((a, b) => a.frameIndex - b.frameIndex);
+
+            const frames = bboxData.length;
+            const targetW = 20;
+            const targetH = 32;
+
+            const canvas = document.getElementById('outCanvas');
+            canvas.width = targetW * frames;
+            canvas.height = targetH;
+            const ctx = canvas.getContext('2d');
+
+            // Queremos que el arte pixelArt no se difumine
+            ctx.imageSmoothingEnabled = false;
+
+            bboxData.forEach((box, i) => {
+                // Aquí calculamos cómo escalar el recorte central (200x200 aprox) 
+                // para que quepa y encaje correctamente en 20x32
+                // La proporción es diferente, forzaremos en altura y centraremos en anchura
+
+                const scale = targetH / box.height;
+                const sw = box.width;
+                const sh = box.height;
+                const sx = box.x;
+                const sy = box.y;
+
+                const scaledW = sw * scale;
+                const scaledH = sh * scale; // esto será targetH (32)
+
+                // Lo centramos horizontalmente en nuestro bloque de 20px
+                const dx = (i * targetW) + (targetW / 2) - (scaledW / 2);
+                const dy = targetH - scaledH; // Alineado a los pies (abajo)
+
+                ctx.drawImage(img, sx, sy, sw, sh, dx, dy, scaledW, scaledH);
+            });
+        });
+    </script>
+</body>
+
+</html>
